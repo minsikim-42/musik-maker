@@ -4,42 +4,60 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>music-maker</title>
-  <!-- 소리 엔진: Tone.js. 브라우저에 인터넷이 있으면 CDN에서 불러온다.
-       (나중에 오프라인/배포용으로는 파일을 프로젝트에 받아 두면 된다.) -->
+  <!-- 소리 엔진: Tone.js (Web Audio API 위에서 악기·타이밍·재생을 다룸) -->
   <script src="https://unpkg.com/tone@14.8.49/build/Tone.js"></script>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <header>
-    <h1>music-maker</h1>
-    <p class="sub">칸을 눌러 음을 찍고 ▶ 재생을 누르세요</p>
+  <!-- 왼쪽에서 밀려나오는 메뉴(드로어) -->
+  <div id="drawer" class="drawer" aria-hidden="true">
+    <div class="drawer-head">
+      <span>메뉴</span>
+      <button id="drawerClose" class="icon-btn" aria-label="메뉴 닫기">✕</button>
+    </div>
+    <nav id="menuList" class="menu-list"><!-- JS가 채운다 --></nav>
+    <p class="drawer-foot">준비 중인 기능은 잠금(🔒)으로 표시됩니다.</p>
+  </div>
+  <div id="scrim" class="scrim" hidden></div>
+
+  <header class="topbar">
+    <button id="hamburger" class="icon-btn" aria-label="메뉴 열기">
+      <span></span><span></span><span></span>
+    </button>
+    <div class="brand">
+      <h1>music-maker</h1>
+      <p class="sub">트랙마다 악기를 고르고, 칸을 눌러 음을 찍고, ▶ 재생</p>
+    </div>
   </header>
 
   <section class="controls">
     <button id="play" class="primary">▶ 재생</button>
     <button id="stop">⏹ 정지</button>
 
-    <label>악기
-      <select id="instrument">
-        <option value="piano">피아노</option>
-        <option value="synth">신스</option>
-        <option value="pluck">플럭(뜯는 음)</option>
-      </select>
-    </label>
-
     <label>템포 <span id="bpmVal">120</span> BPM
       <input id="bpm" type="range" min="40" max="220" value="120" />
     </label>
 
-    <button id="clear">지우기</button>
+    <label>곡 길이
+      <select id="bars">
+        <option value="1">1마디</option>
+        <option value="2" selected>2마디</option>
+        <option value="4">4마디</option>
+      </select>
+    </label>
+
+    <button id="addMelody">＋ 멜로디 트랙</button>
+    <button id="addDrums">＋ 드럼 트랙</button>
   </section>
 
-  <!-- 피아노 롤 격자: 가로=시간(스텝), 세로=음 높이. JS가 채운다. -->
-  <div id="grid" class="grid" aria-label="피아노 롤"></div>
+  <!-- 트랙들이 세로로 쌓인다. JS가 채운다. -->
+  <main id="tracks" class="tracks"></main>
 
   <footer>
-    <span>가로 = 시간(왼→오), 세로 = 음 높이(위가 높음)</span>
+    <span>가로 = 시간(왼→오), 세로 = 음 높이 / 드럼 종류 · 4칸마다 한 박자</span>
   </footer>
+
+  <div id="toast" class="toast" hidden></div>
 
   <script src="app.js"></script>
 </body>

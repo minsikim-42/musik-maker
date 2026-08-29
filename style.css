@@ -1,13 +1,15 @@
 :root {
   --bg: #14161c;
   --panel: #1e2029;
+  --panel2: #262a35;
   --line: #2c2f3a;
   --text: #e7e9ee;
   --muted: #9aa0ad;
   --accent: #6ea8fe;
-  --on: #6ea8fe;      /* 켜진 음표 색 */
-  --playhead: #ffd166; /* 재생 위치 세로줄 */
-  --row-hi: #202430;   /* 흰건반/검은건반 구분 */
+  --on: #6ea8fe;         /* 켜진 음표 */
+  --on-drum: #f4a26b;    /* 드럼 켜진 칸 */
+  --playhead: #ffd166;   /* 재생 위치 */
+  --black-key: #202430;  /* 검은건반 줄 */
 }
 
 * { box-sizing: border-box; }
@@ -17,12 +19,98 @@ body {
   font-family: system-ui, -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
   background: var(--bg);
   color: var(--text);
-  padding: 20px;
+  padding: 0 20px 24px;
 }
 
-header h1 { margin: 0 0 4px; font-size: 22px; }
-header .sub { margin: 0 0 16px; color: var(--muted); font-size: 14px; }
+/* ── 상단바 ─────────────────────────────── */
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px 0;
+}
+.brand h1 { margin: 0; font-size: 20px; }
+.brand .sub { margin: 2px 0 0; color: var(--muted); font-size: 13px; }
 
+.icon-btn {
+  display: inline-flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  width: 42px;
+  height: 42px;
+  padding: 0 11px;
+  background: var(--panel2);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--text);
+  cursor: pointer;
+}
+.icon-btn:hover { border-color: var(--accent); }
+#hamburger span { display: block; height: 2px; background: var(--text); border-radius: 2px; }
+
+/* ── 드로어(왼쪽 메뉴) ──────────────────── */
+.drawer {
+  position: fixed;
+  top: 0; left: 0; bottom: 0;
+  width: 280px;
+  background: var(--panel);
+  border-right: 1px solid var(--line);
+  transform: translateX(-100%);
+  transition: transform .22s ease;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  padding: 16px;
+}
+.drawer.open { transform: translateX(0); }
+.drawer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-weight: 600;
+  margin-bottom: 12px;
+}
+.drawer-head .icon-btn {
+  width: 32px; height: 32px; padding: 0;
+  align-items: center; gap: 0; font-size: 14px;
+}
+.menu-list { display: flex; flex-direction: column; gap: 6px; }
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 12px;
+  background: var(--panel2);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+}
+.menu-item:hover { border-color: var(--accent); }
+.menu-item .ico { font-size: 16px; width: 20px; text-align: center; }
+.menu-item .name { flex: 1; }
+.menu-item .tag {
+  font-size: 11px;
+  color: var(--muted);
+  background: #171a22;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+.menu-item.locked { opacity: .8; }
+.drawer-foot { margin-top: auto; color: var(--muted); font-size: 12px; }
+
+.scrim {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.5);
+  z-index: 20;
+}
+
+/* ── 상단 컨트롤 ────────────────────────── */
 .controls {
   display: flex;
   flex-wrap: wrap;
@@ -34,7 +122,6 @@ header .sub { margin: 0 0 16px; color: var(--muted); font-size: 14px; }
   padding: 12px 14px;
   margin-bottom: 16px;
 }
-
 .controls label {
   display: flex;
   flex-direction: column;
@@ -42,11 +129,10 @@ header .sub { margin: 0 0 16px; color: var(--muted); font-size: 14px; }
   color: var(--muted);
   gap: 4px;
 }
-
 button, select, input[type="range"] {
   font: inherit;
   color: var(--text);
-  background: #262a35;
+  background: var(--panel2);
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 8px 12px;
@@ -55,41 +141,75 @@ button, select, input[type="range"] {
 button:hover { border-color: var(--accent); }
 button.primary { background: var(--accent); color: #0b1020; font-weight: 600; border-color: var(--accent); }
 
-/* 피아노 롤 격자 */
+/* ── 트랙 ───────────────────────────────── */
+.tracks { display: flex; flex-direction: column; gap: 14px; }
+
+.track {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+.track.muted { opacity: .5; }
+.track-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.track-head .kind {
+  font-size: 11px;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+.track-head .name { font-weight: 600; }
+.track-head .spacer { flex: 1; }
+.track-head select, .track-head button { padding: 6px 10px; }
+
 .grid {
   display: grid;
   gap: 2px;
-  background: var(--line);
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  padding: 2px;
   overflow-x: auto;
-  position: relative;
+  padding-bottom: 2px;
 }
-.row { display: contents; }
-
 .label-cell {
-  background: var(--panel);
   color: var(--muted);
   font-size: 11px;
   display: flex;
   align-items: center;
-  justify-content: center;
-  min-width: 44px;
+  padding-right: 8px;
+  min-width: 48px;
   user-select: none;
 }
 .label-cell.sharp { color: #6b7180; }
-
 .cell {
   background: #191c24;
-  min-width: 34px;
-  height: 26px;
+  min-width: 30px;
+  height: 24px;
   border-radius: 4px;
   cursor: pointer;
 }
-.cell.black-key { background: var(--row-hi); }   /* 검은건반 줄은 살짝 어둡게 */
-.cell.beat { box-shadow: inset 2px 0 0 #2f3442; } /* 4칸마다 박자 구분선 */
+.cell.black-key { background: var(--black-key); }
+.cell.beat { box-shadow: inset 2px 0 0 #2f3442; }
 .cell.on { background: var(--on); }
+.cell.on.drum { background: var(--on-drum); }
 .cell.playing { outline: 2px solid var(--playhead); outline-offset: -2px; }
 
-footer { margin-top: 12px; color: var(--muted); font-size: 12px; }
+footer { margin-top: 14px; color: var(--muted); font-size: 12px; }
+
+/* ── 토스트(안내 문구) ──────────────────── */
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  background: #0b1020;
+  color: var(--text);
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  padding: 10px 18px;
+  font-size: 14px;
+  z-index: 40;
+}
