@@ -36,16 +36,37 @@ function trackSound(track) {
 // ══════════════════════════════════════════════════════════════
 //  악기(신스)
 // ══════════════════════════════════════════════════════════════
+// 마스터 소프트 클리퍼: 천장(±1)을 부드럽게 포화시켜 클리핑을 막는다.
+// Web Audio엔 진짜 리미터가 없어 컴프레서는 순간 피크를 놓친다 → WaveShaper로 확실히 눌러준다.
+// 0.7 이하는 그대로(원음 보존), 그 위는 tanh로 완만히 굽혀 입력이 아무리 커도 ~0.93에서 멈춘다.
+function softclip(x) {
+  const t = 0.7, a = Math.abs(x), s = Math.sign(x);
+  return a <= t ? x : s * (t + (1 - t) * Math.tanh((a - t) / (1 - t)));
+}
+function makeMaster() {
+  const ws = new Tone.WaveShaper(softclip, 2048);
+  ws.oversample = "2x"; // 비선형에서 생기는 앨리어싱 완화
+  return ws.toDestination();
+}
+
+// 재생용 마스터: 모든 트랙이 이 소프트 클리퍼를 거쳐 출력된다.
+let masterNode = null;
+function realtimeMaster() {
+  if (!masterNode) masterNode = makeMaster();
+  return masterNode;
+}
+
 // 트랙에 맞는 신스 노드를 만든다(현재 Tone 컨텍스트 기준). 저장/해제는 하지 않는다.
-// → 재생용(buildSynth)과 WAV 오프라인 렌더 양쪽에서 재사용한다.
-function createVoices(track) {
+// out = 최종 출력 노드(마스터 리미터). → 재생용(buildSynth)과 WAV 오프라인 렌더가 공유한다.
+function createVoices(track, out) {
+  out = out || realtimeMaster();
   if (track.type === "drums") {
-    const kick = new Tone.MembraneSynth().toDestination();
+    const kick = new Tone.MembraneSynth().connect(out);
     const snare = new Tone.NoiseSynth({
       noise: { type: "white" },
       envelope: { attack: 0.001, decay: 0.15, sustain: 0 },
-    }).toDestination();
-    const hatOut = new Tone.Filter(7000, "highpass").toDestination();
+    }).connect(out);
+    const hatOut = new Tone.Filter(7000, "highpass").connect(out);
     const hat = new Tone.NoiseSynth({
       noise: { type: "white" },
       envelope: { attack: 0.001, decay: 0.03, sustain: 0 },
@@ -57,7 +78,7 @@ function createVoices(track) {
   // 커스텀 소리(라이브러리 참조): 사용자가 만든 음색. 로우패스 필터로 컷오프까지 조절.
   const snd = trackSound(track);
   if (snd) {
-    const filt = new Tone.Filter(snd.cutoff, "lowpass").toDestination();
+    const filt = new Tone.Filter(snd.cutoff, "lowpass").connect(out);
     const poly = new Tone.PolySynth(Tone.Synth, {
       oscillator: { type: snd.wave },
       envelope: { attack: snd.attack, decay: snd.decay, sustain: snd.sustain, release: snd.release },
@@ -82,7 +103,7 @@ function createVoices(track) {
       envelope: { attack: 0.005, decay: 0.2, sustain: 0.2, release: 0.6 },
     });
   }
-  poly.toDestination();
+  poly.connect(out);
   poly.volume.value = -6;
   return { kind: "melody", poly };
 }
@@ -1059,7 +1080,7 @@ function openSoundEditor(sound) {
 // 소리 미리듣기: 그 소리로 임시 신스를 만들어 짧은 코드 한 번
 async function playSoundPreview(sound) {
   await Tone.start();
-  const filt = new Tone.Filter(sound.cutoff, "lowpass").toDestination();
+  const filt = new Tone.Filter(sound.cutoff, "lowpass").connect(realtimeMaster());
   const poly = new Tone.PolySynth(Tone.Synth, {
     oscillator: { type: sound.wave },
     envelope: { attack: sound.attack, decay: sound.decay, sustain: sound.sustain, release: sound.release },
@@ -1157,7 +1178,8 @@ async function exportWav() {
     const duration = steps * secondsPerStep + 2;         // 뒤에 여운 2초
     const buffer = await Tone.Offline(() => {
       // 콜백 안에서 만든 Tone 노드는 오프라인 컨텍스트에 붙는다(재생용 신스는 안 건드림)
-      for (const t of tracks) scheduleTrackOffline(t, createVoices(t), secondsPerStep);
+      const out = makeMaster(); // 재생과 동일한 마스터 소프트 클리퍼
+      for (const t of tracks) scheduleTrackOffline(t, createVoices(t, out), secondsPerStep);
     }, duration);
     const audioBuf = buffer.get ? buffer.get() : buffer; // ToneAudioBuffer → AudioBuffer
     const blob = audioBufferToWav(audioBuf);
