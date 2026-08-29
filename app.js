@@ -88,19 +88,22 @@ function realtimeMaster() {
 // out = 최종 출력 노드(마스터 리미터). → 재생용(buildSynth)과 WAV 오프라인 렌더가 공유한다.
 function createVoices(track, out) {
   out = out || realtimeMaster();
+  // 트랙 전용 볼륨 노드: 신스 → 트랙 볼륨 → 마스터. 트랙별 소리 크기를 라이브로 조절.
+  const vol = new Tone.Volume(track.volume ?? 0).connect(out);
+
   if (track.type === "drums") {
-    const kick = new Tone.MembraneSynth().connect(out);
+    const kick = new Tone.MembraneSynth().connect(vol);
     const snare = new Tone.NoiseSynth({
       noise: { type: "white" },
       envelope: { attack: 0.001, decay: 0.15, sustain: 0 },
-    }).connect(out);
-    const hatOut = new Tone.Filter(7000, "highpass").connect(out);
+    }).connect(vol);
+    const hatOut = new Tone.Filter(7000, "highpass").connect(vol);
     const hat = new Tone.NoiseSynth({
       noise: { type: "white" },
       envelope: { attack: 0.001, decay: 0.03, sustain: 0 },
     }).connect(hatOut);
     kick.volume.value = -4; snare.volume.value = -10; hat.volume.value = -14;
-    return { kind: "drums", kick, snare, hat, hatOut };
+    return { kind: "drums", kick, snare, hat, hatOut, vol };
   }
 
   // 커스텀 소리(라이브러리 참조)
@@ -109,25 +112,25 @@ function createVoices(track, out) {
     // 오디오 샘플: 한 샘플을 음정에 맞춰 재생(Tone.Sampler). 버퍼가 준비됐을 때만.
     const buf = sampleBuffers[snd.id];
     if (buf && buf.loaded) {
-      const sampler = new Tone.Sampler({ urls: { [snd.baseNote || "C4"]: buf } }).connect(out);
+      const sampler = new Tone.Sampler({ urls: { [snd.baseNote || "C4"]: buf } }).connect(vol);
       sampler.volume.value = snd.volume ?? -6;
-      return { kind: "melody", poly: sampler }; // Sampler도 triggerAttackRelease(note,dur,time) 동일
+      return { kind: "melody", poly: sampler, vol }; // Sampler도 triggerAttackRelease(note,dur,time) 동일
     }
     // 아직 로딩 전 → 조용한 폴백(로드되면 loadSampleBuffer가 재생성)
     loadSampleBuffer(snd);
-    const silent = new Tone.PolySynth(Tone.Synth).connect(out);
+    const silent = new Tone.PolySynth(Tone.Synth).connect(vol);
     silent.volume.value = -60;
-    return { kind: "melody", poly: silent };
+    return { kind: "melody", poly: silent, vol };
   }
   if (snd) {
     // 신스 소리: 사용자가 만든 음색. 로우패스 필터로 컷오프까지 조절.
-    const filt = new Tone.Filter(snd.cutoff, "lowpass").connect(out);
+    const filt = new Tone.Filter(snd.cutoff, "lowpass").connect(vol);
     const poly = new Tone.PolySynth(Tone.Synth, {
       oscillator: { type: snd.wave },
       envelope: { attack: snd.attack, decay: snd.decay, sustain: snd.sustain, release: snd.release },
     }).connect(filt);
     poly.volume.value = snd.volume;
-    return { kind: "melody", poly, filt };
+    return { kind: "melody", poly, filt, vol };
   }
 
   // 모든 악기는 PolySynth(Tone.Synth) 기반(화음 가능). PluckSynth/NoiseSynth는 Monophonic이 아니라
@@ -169,9 +172,9 @@ function createVoices(track, out) {
       envelope: { attack: 0.005, decay: 0.2, sustain: 0.2, release: 0.6 },
     });
   }
-  poly.connect(out);
+  poly.connect(vol);
   poly.volume.value = track.instrument === "wind" ? -4 : -6; // 사인은 살짝 작게 들려 보정
-  return { kind: "melody", poly };
+  return { kind: "melody", poly, vol };
 }
 
 function buildSynth(track) {
@@ -202,6 +205,13 @@ function disposeSynth(s) {
   if (!s) return;
   if (s.kind === "drums") { s.kick.dispose(); s.snare.dispose(); s.hat.dispose(); s.hatOut.dispose(); }
   else { s.poly.dispose(); if (s.filt) s.filt.dispose(); }
+  if (s.vol) s.vol.dispose();
+}
+
+// 트랙 볼륨을 라이브로 조절(재생성 없이)
+function setTrackVolume(track, db) {
+  track.volume = db;
+  if (track.synth && track.synth.vol) track.synth.vol.volume.value = db;
 }
 
 function triggerTrack(track, col, time) {
@@ -256,6 +266,7 @@ function makeTrackObj(type, data) {
     name: data?.name ?? ("트랙 " + trackSeq),
     muted: data?.muted ?? false,
     collapsed: data?.collapsed ?? false,
+    volume: data?.volume ?? 0,
     grid: null,
     synth: null,
     cellEls: null,
@@ -430,6 +441,18 @@ function renderTrack(track) {
     head.appendChild(toneBtn);
   }
 
+  // 트랙 볼륨(소리 크기) — 접힘/펼침 모두 표시(믹싱)
+  const volWrap = document.createElement("label");
+  volWrap.className = "t-vol";
+  volWrap.title = "트랙 소리 크기";
+  const volIn = document.createElement("input");
+  volIn.type = "range"; volIn.min = -30; volIn.max = 6; volIn.step = 1;
+  volIn.value = track.volume ?? 0;
+  volIn.addEventListener("input", () => { setTrackVolume(track, Number(volIn.value)); markDirty(); });
+  volWrap.appendChild(Object.assign(document.createElement("span"), { className: "t-vol-ico", textContent: "🔊" }));
+  volWrap.appendChild(volIn);
+  head.appendChild(volWrap);
+
   const muteBtn = document.createElement("button");
   muteBtn.textContent = track.muted ? "음소거 해제" : "음소거";
   muteBtn.addEventListener("click", () => { track.muted = !track.muted; render(); markDirty(); });
@@ -596,6 +619,7 @@ function serialize() {
       name: t.name,
       muted: t.muted,
       collapsed: !!t.collapsed,
+      volume: t.volume ?? 0,
       grid: t.grid.map((row) => row.slice()),
     })),
   };
@@ -953,11 +977,12 @@ function pushSoundParams(bytes, s) {
   bytes.push(q8(s.volume, PARAM_RANGES.volume));
 }
 
-// 버전 4: 멜로디 음역 확장(C3~C6, 37줄). 소리 라이브러리 + 트랙의 소리 참조.
-// (v1~v3 링크도 decodeShare가 계속 연다 — 그때 멜로디는 13줄이었다)
+const TRACK_VOL = [-30, 6]; // 트랙 볼륨 dB 범위(공유 링크 양자화용)
+
+// 버전 5: 트랙 볼륨 추가. (v1~v4 링크도 decodeShare가 계속 연다)
 function encodeShare(name, data) {
   const bytes = [];
-  bytes.push(4);
+  bytes.push(5);
   pushName(bytes, name);
   bytes.push(Math.max(0, Math.min(255, data.bpm || 120)));
   bytes.push(data.bars);
@@ -978,6 +1003,7 @@ function encodeShare(name, data) {
     } else ib = Math.max(0, BUILTIN.indexOf(t.instrument));
     bytes.push(ib);
     bytes.push(t.muted ? 1 : 0);
+    bytes.push(q8(t.volume ?? 0, TRACK_VOL)); // v5: 트랙 볼륨
     pushName(bytes, t.name);
     // 격자 비트 패킹
     let cur = 0, nb = 0;
@@ -1006,7 +1032,7 @@ function decodeShare(code) {
   });
 
   const ver = b[i++];
-  if (![1, 2, 3, 4].includes(ver)) throw new Error("알 수 없는 공유 버전");
+  if (![1, 2, 3, 4, 5].includes(ver)) throw new Error("알 수 없는 공유 버전");
   const name = readName();
   const bpm = b[i++];
   const bars = b[i++];
@@ -1046,9 +1072,10 @@ function decodeShare(code) {
       else if (ib >= 100) { type = "melody"; const snd = sounds[ib - 100]; instrument = snd ? "snd:" + snd.id : "piano"; }
       else { type = "melody"; instrument = BUILTIN[ib] || "piano"; }
       const muted = b[i++] === 1;
+      const volume = ver >= 5 ? dq8(b[i++], TRACK_VOL) : 0;
       const tname = readName();
       const grid = readGrid(type === "drums" ? DRUM_ROWS.length : melodyRows);
-      tracks.push({ type, instrument, name: tname, muted, grid });
+      tracks.push({ type, instrument, name: tname, muted, volume, grid });
     } else {
       // v1/v2 레거시: [type][instr][muted][name] (v2 custom이면 음색 7B) [grid]
       const type = b[i++] === 1 ? "drums" : "melody";

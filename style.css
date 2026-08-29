@@ -260,6 +260,17 @@ button.primary { background: var(--accent); color: #0b1020; font-weight: 600; bo
   border-radius: 6px; padding: 4px 8px; color: var(--text);
   min-width: 120px;
 }
+/* 트랙 볼륨(소리 크기) */
+.track-head .t-vol {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.track-head .t-vol-ico { font-size: 13px; }
+.track-head .t-vol input[type="range"] {
+  width: 84px;
+  padding: 0;
+}
 
 .grid {
   display: grid;

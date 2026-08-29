@@ -147,6 +147,8 @@ migration을 챙길 것**: 예전 저장은 멜로디 13줄(`LEGACY_MELODY_NOTES
   - 소리 음색 7바이트 = 파형1 + ADSR4 + 컷오프1 + 볼륨1 (`q8`/`dq8`로 양자화).
   - 트랙 `instr바이트`: 0~3 = 기본 악기(`BUILTIN`), 200 = 드럼, 100+idx = `sounds[idx]` 참조.
   - 멜로디 격자 줄 수: v4 = 37(C6~C3), v1~v3 = 13. `decodeShare`가 버전으로 가른다(`melodyRows`).
+  - v5: 트랙마다 `[instr][muted][volume][name][grid]` — 볼륨 1바이트 추가(`TRACK_VOL` 범위). v<5는 볼륨 0.
+    트랙 볼륨은 `createVoices`의 트랙 전용 `Tone.Volume` 노드로 적용, `setTrackVolume`이 라이브 조절.
   - 양자화로 값이 아주 미세하게 바뀔 수 있으나 귀로는 구분 안 됨.
 - **하위호환**: `decodeShare`가 v1/v2(소리 섹션 없음·트랙마다 `[type][instr][muted][이름](+커스텀 음색7B)[격자]`),
   v3(소리 섹션 있음·멜로디 13줄)도 처리한다. v1/v2의 `custom` 트랙과 v1~v3의 13줄 멜로디는
