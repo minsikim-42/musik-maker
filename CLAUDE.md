@@ -86,30 +86,34 @@ localStorage 상태나 공유 코덱 round-trip은 `javascript_tool`로 `localSt
 ```
 `data` = 곡 내용(저장·공유 대상):
 ```js
-{ bpm, bars, tracks: [ trackData, ... ] }
+{ bpm, bars, sounds: [ sound, ... ], tracks: [ trackData, ... ] }
 ```
+
+### 소리(신스 프리셋) — 라이브러리
+```js
+sound = { id, name, wave:"sine|triangle|square|sawtooth", attack, decay, sustain, release, cutoff, volume }
+```
+- 곡마다 `data.sounds` 배열(런타임 전역 `soundLib`). 사용자가 신디사이저에서 만든다.
+- 범위는 `PARAM_RANGES`. 편집은 `applySoundToTracks`→`applyParamsLive`가 `poly.set`으로 **즉시 반영**(재생성 없음).
+- 트랙은 소리를 **id로 참조**(`instrument="snd:<id>"`)한다 → 소리 하나를 고치면 그 소리를 쓰는 모든 트랙이 바뀐다.
+- 신디사이저 UI = **소리 관리자**(`openSoundManager`: 추가/이름변경/삭제) + **음색 편집기**(`openSoundEditor`:
+  슬라이더). 둘 다 공유 `#modal`. 소리를 지우면 그 소리를 쓰던 트랙은 피아노로 되돌린다.
 
 ### 트랙
 ```js
 trackData = {
-  type: "melody" | "drums",  // 사운드로부터 파생: "드럼"이면 drums, 나머지는 melody
-  instrument: "piano"|"synth"|"pluck"|"bass"|"custom" | null(드럼),
+  type: "melody" | "drums",  // instrument로부터 파생: 드럼이면 drums, 나머지는 melody
+  instrument: "piano"|"synth"|"pluck"|"bass" | "snd:<id>"(커스텀 소리) | null(드럼),
   name, muted,
-  params: {…} | null,        // instrument==="custom"일 때만. 커스텀 음색
   grid: boolean[rows][steps], // rows: 멜로디=13(반음), 드럼=3(하이햇/스네어/킥). steps = bars*16
 }
 ```
-**사운드는 트랙마다 드롭다운 하나로 고른다**(피아노/신스/플럭/베이스/커스텀/드럼). 사운드를 바꾸면
-`track.instrument`가 바뀌고, **드럼↔멜로디처럼 줄 구성이 달라지는 전환은 그 트랙의 격자를 새로 시작한다**
-(줄 의미가 달라 매핑이 불가능). 같은 멜로디 계열 안에서 악기만 바꾸면 격자는 유지된다.
+**사운드는 트랙마다 드롭다운 하나로 고른다**: 기본 악기 + 내가 만든 소리들 + `🎹 소리 만들기·편집…` + 드럼.
+사운드를 바꾸면 `track.instrument`가 바뀌고, **드럼↔멜로디처럼 줄 구성이 달라지는 전환은 그 트랙의 격자를 새로
+시작한다**(줄 의미가 달라 매핑 불가). 같은 멜로디 계열 안에서 바꾸면 격자는 유지된다.
 런타임 트랙 객체엔 추가로 `id`, `synth`(Tone 인스턴스), `cellEls`(DOM 참조)가 붙지만
-**직렬화에는 넣지 않는다**(`serialize`가 골라 담는다).
-
-### 커스텀 음색 (params)
-```js
-{ wave:"sine|triangle|square|sawtooth", attack, decay, sustain, release, cutoff, volume }
-```
-범위는 `PARAM_RANGES`. 슬라이더 편집은 `applyParamsLive`가 `poly.set`으로 **즉시 반영**(신스 재생성 없음).
+**직렬화에는 넣지 않는다**(`serialize`가 골라 담는다). 구버전 `instrument:"custom"+params`는 로드 시
+`makeTrackObj`가 소리 라이브러리로 자동 마이그레이션한다.
 
 ---
 
@@ -126,9 +130,13 @@ trackData = {
 
 - 서버 없이 곡을 **URL 해시**(`#song=<base64url>`)에 담는다. 격자가 불리언이라 그대로 JSON+base64면
   링크가 길어지므로 **비트로 패킹**한다(2트랙 2마디 ≈ 150자).
-- 형식: `[버전][곡이름][bpm][bars][트랙수] 트랙마다{ [type][instr][muted][이름] (커스텀이면 음색7B) [격자비트] }`.
-- **버전 2** = 커스텀 음색 지원. 커스텀 트랙은 음색을 7바이트로 양자화(`q8`/`dq8`): 파형1 + ADSR4 + 컷오프1 + 볼륨1.
-  양자화 때문에 값이 아주 미세하게 바뀔 수 있으나 귀로는 구분 안 됨. **버전 1 링크도 계속 열린다(하위호환)** — `decodeShare`가 ver 1/2 모두 처리.
+- **버전 3**(현재): `[3][곡이름][bpm][bars] [소리수] 소리마다{ [이름][음색7B] } [트랙수] 트랙마다{ [instr바이트][muted][이름][격자비트] }`.
+  - 소리 음색 7바이트 = 파형1 + ADSR4 + 컷오프1 + 볼륨1 (`q8`/`dq8`로 양자화).
+  - 트랙 `instr바이트`: 0~3 = 기본 악기(`BUILTIN`), 200 = 드럼, 100+idx = `sounds[idx]` 참조.
+  - 양자화로 값이 아주 미세하게 바뀔 수 있으나 귀로는 구분 안 됨.
+- **하위호환**: `decodeShare`가 v1/v2(트랙마다 `[type][instr][muted][이름](+커스텀 음색7B)[격자]`, 소리 섹션 없음)도
+  처리한다. v1/v2의 `custom` 트랙은 `deserialize`→`makeTrackObj`가 소리 라이브러리로 마이그레이션한다.
+  `encodeShare`는 항상 v3로 쓴다. 포맷을 또 바꾸면 **버전 바이트를 올리고 옛 버전 디코드를 남겨 둘 것**.
 - 링크로 접속하면 `importFromHash`가 그 곡을 **새 세션으로 담고** 열고, 주소창의 코드는 `history.replaceState`로 정리한다.
 
 ---

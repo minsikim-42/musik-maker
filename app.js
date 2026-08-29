@@ -18,6 +18,21 @@ let steps = bars * STEPS_PER_BAR;
 let trackSeq = 0;
 const tracks = []; // { id, type, instrument, name, muted, grid, synth, cellEls }
 
+// 커스텀 "소리(신스 프리셋)" 라이브러리 — 현재 곡의 것. 트랙은 instrument="snd:<id>"로 참조한다.
+// 소리 = { id, name, wave, attack, decay, sustain, release, cutoff, volume }
+let soundLib = [];
+function genSoundId() { return "snd" + Date.now() + Math.floor(Math.random() * 1000); }
+function findSound(id) { return soundLib.find((s) => s.id === id) || null; }
+function newSound(name) {
+  const s = { id: genSoundId(), name: name || ("소리 " + (soundLib.length + 1)), ...defaultParams() };
+  soundLib.push(s);
+  return s;
+}
+// 트랙이 참조하는 소리(없으면 null). 소리 객체 자체가 params 필드를 갖는다.
+function trackSound(track) {
+  return track.instrument && track.instrument.startsWith("snd:") ? findSound(track.instrument.slice(4)) : null;
+}
+
 // ══════════════════════════════════════════════════════════════
 //  악기(신스)
 // ══════════════════════════════════════════════════════════════
@@ -39,15 +54,15 @@ function buildSynth(track) {
     return { kind: "drums", kick, snare, hat, hatOut };
   }
 
-  // 커스텀: 사용자가 만든 음색(파라미터). 로우패스 필터를 거쳐 컷오프까지 조절.
-  if (track.instrument === "custom") {
-    const p = track.params || defaultParams();
-    const filt = new Tone.Filter(p.cutoff, "lowpass").toDestination();
+  // 커스텀 소리(라이브러리 참조): 사용자가 만든 음색. 로우패스 필터로 컷오프까지 조절.
+  const snd = trackSound(track);
+  if (snd) {
+    const filt = new Tone.Filter(snd.cutoff, "lowpass").toDestination();
     const poly = new Tone.PolySynth(Tone.Synth, {
-      oscillator: { type: p.wave },
-      envelope: { attack: p.attack, decay: p.decay, sustain: p.sustain, release: p.release },
+      oscillator: { type: snd.wave },
+      envelope: { attack: snd.attack, decay: snd.decay, sustain: snd.sustain, release: snd.release },
     }).connect(filt);
-    poly.volume.value = p.volume;
+    poly.volume.value = snd.volume;
     return { kind: "melody", poly, filt };
   }
 
@@ -76,14 +91,19 @@ function buildSynth(track) {
 function defaultParams() {
   return { wave: "sawtooth", attack: 0.01, decay: 0.2, sustain: 0.4, release: 0.6, cutoff: 2000, volume: -8 };
 }
-// 편집기에서 슬라이더를 움직일 때: 트랙 신스에 즉시 반영(재생성 없이)
+// 소리를 편집할 때: 그 소리를 쓰는 트랙 신스에 즉시 반영(재생성 없이)
 function applyParamsLive(track) {
   const s = track.synth;
   if (!s || s.kind !== "melody" || !s.poly.set) return;
-  const p = track.params;
+  const p = trackSound(track);
+  if (!p) return;
   s.poly.set({ oscillator: { type: p.wave }, envelope: { attack: p.attack, decay: p.decay, sustain: p.sustain, release: p.release } });
   s.poly.volume.value = p.volume;
   if (s.filt) s.filt.frequency.value = p.cutoff;
+}
+// 소리 하나를 편집하면 그 소리를 쓰는 모든 트랙에 반영
+function applySoundToTracks(sound) {
+  for (const t of tracks) if (t.instrument === "snd:" + sound.id) applyParamsLive(t);
 }
 
 function disposeSynth(s) {
@@ -129,19 +149,24 @@ function preview(track, r) {
 // data가 있으면(불러오기) 그 값으로, 없으면 빈 트랙으로 만든다.
 function makeTrackObj(type, data) {
   const rows = type === "drums" ? DRUM_ROWS : MELODY_NOTES;
+  let instrument = data?.instrument ?? (type === "drums" ? null : "piano");
+  // 구버전 마이그레이션: instrument "custom" + params → 소리 라이브러리로 옮기고 참조로 바꾼다
+  if (instrument === "custom") {
+    const snd = { id: genSoundId(), name: (data?.name ? data.name + " 소리" : "소리 " + (soundLib.length + 1)),
+      ...defaultParams(), ...(data?.params || {}) };
+    soundLib.push(snd);
+    instrument = "snd:" + snd.id;
+  }
   const track = {
     id: ++trackSeq,
     type,
-    instrument: data?.instrument ?? (type === "drums" ? null : "piano"),
+    instrument,
     name: data?.name ?? ("트랙 " + trackSeq),
     muted: data?.muted ?? false,
-    // 커스텀 음색 파라미터(악기가 custom일 때만 의미. 저장된 값이 있으면 채운다)
-    params: data?.params ? { ...defaultParams(), ...data.params } : null,
     grid: null,
     synth: null,
     cellEls: null,
   };
-  if (track.instrument === "custom" && !track.params) track.params = defaultParams();
   // 격자: 저장된 값이 있으면 현재 steps에 맞춰 정규화, 없으면 빈 격자
   track.grid = rows.map((_, r) => {
     const row = new Array(steps).fill(false);
@@ -207,19 +232,24 @@ function renderTrack(track) {
   head.className = "track-head";
   head.innerHTML = `<span class="name">${track.name}</span><span class="spacer"></span>`;
 
-  // 사운드(악기) 선택 — 모든 트랙 공통. '드럼'도 하나의 사운드다.
+  // 사운드(악기) 선택 — 모든 트랙 공통. 기본 악기 + 내가 만든 소리 + 드럼.
   // 드럼↔멜로디는 격자 줄 구성이 달라서 바꾸면 그 트랙의 격자는 새로 시작된다.
   const sel = document.createElement("select");
-  const SOUNDS = [["piano", "피아노"], ["synth", "신스"], ["pluck", "플럭"], ["bass", "베이스"], ["custom", "커스텀 🎹"], ["drums", "드럼"]];
   const curVal = track.type === "drums" ? "drums" : track.instrument;
-  for (const [val, lbl] of SOUNDS) {
+  const addOpt = (val, lbl) => {
     const o = document.createElement("option");
     o.value = val; o.textContent = lbl;
     if (val === curVal) o.selected = true;
     sel.appendChild(o);
-  }
+  };
+  for (const [val, lbl] of [["piano", "피아노"], ["synth", "신스"], ["pluck", "플럭"], ["bass", "베이스"]]) addOpt(val, lbl);
+  for (const snd of soundLib) addOpt("snd:" + snd.id, "🎹 " + snd.name);
+  addOpt("__manage", "🎹 소리 만들기·편집…");
+  addOpt("drums", "드럼");
+
   sel.addEventListener("change", () => {
     const v = sel.value;
+    if (v === "__manage") { sel.value = curVal; openSoundManager(); return; } // 관리자만 열고 트랙은 그대로
     const newType = v === "drums" ? "drums" : "melody";
     if (newType !== track.type) {
       // 줄 의미가 달라지므로 격자를 새로 시작(빈 격자)
@@ -227,19 +257,18 @@ function renderTrack(track) {
       const nrows = newType === "drums" ? DRUM_ROWS : MELODY_NOTES;
       track.grid = nrows.map(() => new Array(steps).fill(false));
     }
-    track.instrument = newType === "drums" ? null : v;
-    if (track.instrument === "custom" && !track.params) track.params = defaultParams();
+    track.instrument = newType === "drums" ? null : v; // v는 기본악기 또는 "snd:<id>"
     track.synth = buildSynth(track);
     render();       // 격자·'음색' 버튼 갱신
     markDirty();
   });
   head.appendChild(sel);
 
-  // 커스텀 음색일 때만 음색 편집 버튼
-  if (track.type === "melody" && track.instrument === "custom") {
+  // 커스텀 소리를 쓰는 트랙이면 그 소리를 바로 편집하는 버튼
+  if (track.type === "melody" && trackSound(track)) {
     const toneBtn = document.createElement("button");
     toneBtn.textContent = "🎹 음색";
-    toneBtn.addEventListener("click", () => openSynthModal(track));
+    toneBtn.addEventListener("click", () => openSoundEditor(trackSound(track)));
     head.appendChild(toneBtn);
   }
 
@@ -352,12 +381,12 @@ function serialize() {
   return {
     bpm: Number(bpm.value),
     bars,
+    sounds: soundLib.map((s) => ({ ...s })), // 커스텀 소리 라이브러리
     tracks: tracks.map((t) => ({
       type: t.type,
-      instrument: t.instrument,
+      instrument: t.instrument, // 기본악기 | null(드럼) | "snd:<id>"
       name: t.name,
       muted: t.muted,
-      params: t.instrument === "custom" && t.params ? { ...t.params } : null,
       grid: t.grid.map((row) => row.slice()),
     })),
   };
@@ -369,6 +398,9 @@ function deserialize(data) {
   Tone.Transport.stop();
   if (seq) seq.stop();
   clearTracks();
+
+  // 소리 라이브러리 먼저 복원(트랙이 참조하므로). 누락 필드는 기본값으로 채운다.
+  soundLib = (data.sounds || []).map((s) => ({ ...defaultParams(), ...s }));
 
   bars = data.bars || 2;
   steps = bars * STEPS_PER_BAR;
@@ -383,11 +415,12 @@ function deserialize(data) {
   loading = false;
 }
 
-// 새 빈 곡의 기본 구성: 트랙 하나(피아노). 사운드는 트랙에서 바꾼다.
+// 새 빈 곡의 기본 구성: 트랙 하나(피아노), 소리 라이브러리는 비어 있음.
 function freshSongData() {
   return {
     bpm: 120,
     bars: 2,
+    sounds: [],
     tracks: [
       { type: "melody", instrument: "piano", name: "트랙 1", muted: false, grid: null },
     ],
@@ -583,18 +616,12 @@ document.getElementById("newSong").addEventListener("click", () => newSong(true)
 // action이 있으면 실제로 동작하는 항목(잠금 아님), tag만 있으면 준비 중.
 const MENU = [
   { ico: "🔗", name: "링크로 공유 (다른 기기)", action: () => { closeDrawer(); openShareModal(); } },
-  { ico: "🎹", name: "신디사이저 (음색 편집)", action: () => { closeDrawer(); openSynthFromMenu(); } },
+  { ico: "🎹", name: "신디사이저 (소리 만들기·편집)", action: () => { closeDrawer(); openSoundManager(); } },
   { ico: "⚙️", name: "환경설정", tag: "준비 중" },
   { ico: "📤", name: "WAV로 내보내기", tag: "예정" },
   { ico: "🎼", name: "오선지 악보 보기", tag: "예정" },
 ];
 
-// 메뉴에서 열면: 커스텀 트랙이 있으면 그 음색을, 없으면 안내
-function openSynthFromMenu() {
-  const custom = tracks.find((t) => t.type === "melody" && t.instrument === "custom");
-  if (custom) openSynthModal(custom);
-  else showToast("멜로디 트랙 악기를 '커스텀 🎹'으로 바꾸면 음색을 편집할 수 있어요");
-}
 
 const drawer = document.getElementById("drawer");
 const scrim = document.getElementById("scrim");
@@ -658,7 +685,8 @@ function showToast(msg, actionLabel, onAction) {
 // ══════════════════════════════════════════════════════════════
 // 격자가 불리언이라 그대로 JSON에 담으면 링크가 너무 길어진다.
 // → 비트로 패킹해 base64로 만들어 링크를 짧게 유지한다.
-const INSTR_LIST = ["piano", "synth", "pluck", "bass", "custom"];
+const INSTR_LIST = ["piano", "synth", "pluck", "bass", "custom"]; // v1/v2 레거시 디코드용
+const BUILTIN = ["piano", "synth", "pluck", "bass"];              // v3 기본 악기(0..3)
 const WAVE_LIST = ["sine", "triangle", "square", "sawtooth"];
 // 커스텀 음색 파라미터를 바이트로 양자화(공유 링크에 싣기 위해). [min,max]
 const PARAM_RANGES = { attack: [0, 2], decay: [0, 2], sustain: [0, 1], release: [0, 3], cutoff: [200, 8000], volume: [-30, 0] };
@@ -678,32 +706,45 @@ function b64urlToBytes(str) {
   return out;
 }
 
+function pushName(bytes, s) {
+  const nB = Array.from(new TextEncoder().encode(s || "")).slice(0, 255);
+  bytes.push(nB.length, ...nB);
+}
+function pushSoundParams(bytes, s) {
+  bytes.push(Math.max(0, WAVE_LIST.indexOf(s.wave)));
+  bytes.push(q8(s.attack, PARAM_RANGES.attack));
+  bytes.push(q8(s.decay, PARAM_RANGES.decay));
+  bytes.push(q8(s.sustain, PARAM_RANGES.sustain));
+  bytes.push(q8(s.release, PARAM_RANGES.release));
+  bytes.push(q8(s.cutoff, PARAM_RANGES.cutoff));
+  bytes.push(q8(s.volume, PARAM_RANGES.volume));
+}
+
+// 버전 3: 소리 라이브러리 + 트랙의 소리 참조. (v1/v2 링크도 decodeShare가 계속 연다)
 function encodeShare(name, data) {
   const bytes = [];
-  bytes.push(2); // 버전 2: 커스텀 음색 파라미터 지원(v1은 커스텀 없음, 하위호환)
-  const nameB = Array.from(new TextEncoder().encode(name)).slice(0, 255);
-  bytes.push(nameB.length, ...nameB);
+  bytes.push(3);
+  pushName(bytes, name);
   bytes.push(Math.max(0, Math.min(255, data.bpm || 120)));
   bytes.push(data.bars);
+
+  // 소리 라이브러리
+  const sounds = data.sounds || [];
+  bytes.push(sounds.length);
+  for (const s of sounds) { pushName(bytes, s.name); pushSoundParams(bytes, { ...defaultParams(), ...s }); }
+
+  // 트랙
   bytes.push(data.tracks.length);
   for (const t of data.tracks) {
-    bytes.push(t.type === "drums" ? 1 : 0);
-    const instr = t.type === "drums" ? 0 : Math.max(0, INSTR_LIST.indexOf(t.instrument));
-    bytes.push(instr);
+    let ib;
+    if (t.type === "drums") ib = 200;
+    else if (t.instrument && t.instrument.startsWith("snd:")) {
+      const idx = sounds.findIndex((s) => s.id === t.instrument.slice(4));
+      ib = idx < 0 ? 0 : 100 + idx;
+    } else ib = Math.max(0, BUILTIN.indexOf(t.instrument));
+    bytes.push(ib);
     bytes.push(t.muted ? 1 : 0);
-    const tnB = Array.from(new TextEncoder().encode(t.name)).slice(0, 255);
-    bytes.push(tnB.length, ...tnB);
-    // 커스텀 음색: 파라미터 7바이트(파형 + ADSR + 컷오프 + 볼륨)
-    if (t.type === "melody" && t.instrument === "custom") {
-      const p = { ...defaultParams(), ...(t.params || {}) };
-      bytes.push(Math.max(0, WAVE_LIST.indexOf(p.wave)));
-      bytes.push(q8(p.attack, PARAM_RANGES.attack));
-      bytes.push(q8(p.decay, PARAM_RANGES.decay));
-      bytes.push(q8(p.sustain, PARAM_RANGES.sustain));
-      bytes.push(q8(p.release, PARAM_RANGES.release));
-      bytes.push(q8(p.cutoff, PARAM_RANGES.cutoff));
-      bytes.push(q8(p.volume, PARAM_RANGES.volume));
-    }
+    pushName(bytes, t.name);
     // 격자 비트 패킹
     let cur = 0, nb = 0;
     for (let r = 0; r < t.grid.length; r++)
@@ -719,51 +760,74 @@ function encodeShare(name, data) {
 function decodeShare(code) {
   const b = b64urlToBytes(code);
   let i = 0;
+  const readName = () => { const l = b[i++]; const s = new TextDecoder().decode(b.slice(i, i + l)); i += l; return s; };
+  const readParams = () => ({
+    wave: WAVE_LIST[b[i++]] || "sawtooth",
+    attack: dq8(b[i++], PARAM_RANGES.attack),
+    decay: dq8(b[i++], PARAM_RANGES.decay),
+    sustain: dq8(b[i++], PARAM_RANGES.sustain),
+    release: dq8(b[i++], PARAM_RANGES.release),
+    cutoff: dq8(b[i++], PARAM_RANGES.cutoff),
+    volume: dq8(b[i++], PARAM_RANGES.volume),
+  });
+
   const ver = b[i++];
-  if (ver !== 1 && ver !== 2) throw new Error("알 수 없는 공유 버전");
-  const nlen = b[i++];
-  const name = new TextDecoder().decode(b.slice(i, i + nlen)); i += nlen;
+  if (![1, 2, 3].includes(ver)) throw new Error("알 수 없는 공유 버전");
+  const name = readName();
   const bpm = b[i++];
   const bars = b[i++];
   const steps = bars * STEPS_PER_BAR;
+
+  // 소리 라이브러리(v3부터)
+  const sounds = [];
+  if (ver >= 3) {
+    const sc = b[i++];
+    for (let k = 0; k < sc; k++) {
+      const nm = readName();
+      sounds.push({ id: genSoundId(), name: nm, ...readParams() });
+    }
+  }
+
+  const readGrid = (rows) => {
+    const need = Math.ceil((rows * steps) / 8);
+    const gb = b.slice(i, i + need); i += need;
+    const grid = []; let idx = 0;
+    for (let r = 0; r < rows; r++) {
+      const row = [];
+      for (let c = 0; c < steps; c++) { row.push(!!((gb[idx >> 3] >> (7 - (idx & 7))) & 1)); idx++; }
+      grid.push(row);
+    }
+    return grid;
+  };
+
   const n = b[i++];
   const tracks = [];
   for (let k = 0; k < n; k++) {
-    const type = b[i++] === 1 ? "drums" : "melody";
-    const instr = b[i++];
-    const muted = b[i++] === 1;
-    const tnlen = b[i++];
-    const tname = new TextDecoder().decode(b.slice(i, i + tnlen)); i += tnlen;
-    // 커스텀 음색 파라미터(v2에서, 커스텀 멜로디 트랙만)
-    let params = null;
-    if (ver >= 2 && type === "melody" && INSTR_LIST[instr] === "custom") {
-      params = {
-        wave: WAVE_LIST[b[i++]] || "sawtooth",
-        attack: dq8(b[i++], PARAM_RANGES.attack),
-        decay: dq8(b[i++], PARAM_RANGES.decay),
-        sustain: dq8(b[i++], PARAM_RANGES.sustain),
-        release: dq8(b[i++], PARAM_RANGES.release),
-        cutoff: dq8(b[i++], PARAM_RANGES.cutoff),
-        volume: dq8(b[i++], PARAM_RANGES.volume),
-      };
+    if (ver >= 3) {
+      const ib = b[i++];
+      let type, instrument;
+      if (ib === 200) { type = "drums"; instrument = null; }
+      else if (ib >= 100) { type = "melody"; const snd = sounds[ib - 100]; instrument = snd ? "snd:" + snd.id : "piano"; }
+      else { type = "melody"; instrument = BUILTIN[ib] || "piano"; }
+      const muted = b[i++] === 1;
+      const tname = readName();
+      const grid = readGrid(type === "drums" ? DRUM_ROWS.length : MELODY_NOTES.length);
+      tracks.push({ type, instrument, name: tname, muted, grid });
+    } else {
+      // v1/v2 레거시: [type][instr][muted][name] (v2 custom이면 음색 7B) [grid]
+      const type = b[i++] === 1 ? "drums" : "melody";
+      const instr = b[i++];
+      const muted = b[i++] === 1;
+      const tname = readName();
+      let params = null;
+      if (ver >= 2 && type === "melody" && INSTR_LIST[instr] === "custom") params = readParams();
+      const grid = readGrid(type === "drums" ? DRUM_ROWS.length : MELODY_NOTES.length);
+      // 레거시 custom → makeTrackObj가 소리로 마이그레이션(instrument "custom"+params 유지)
+      const instrument = type === "drums" ? null : (INSTR_LIST[instr] || "piano");
+      tracks.push({ type, instrument, name: tname, muted, params, grid });
     }
-    const rows = type === "drums" ? DRUM_ROWS.length : MELODY_NOTES.length;
-    const total = rows * steps;
-    const need = Math.ceil(total / 8);
-    const gb = b.slice(i, i + need); i += need;
-    const grid = [];
-    let idx = 0;
-    for (let r = 0; r < rows; r++) {
-      const row = [];
-      for (let c = 0; c < steps; c++) {
-        const bit = (gb[idx >> 3] >> (7 - (idx & 7))) & 1;
-        row.push(!!bit); idx++;
-      }
-      grid.push(row);
-    }
-    tracks.push({ type, instrument: type === "drums" ? null : (INSTR_LIST[instr] || "piano"), name: tname, muted, params, grid });
   }
-  return { name, bpm, bars, tracks };
+  return { name, bpm, bars, sounds, tracks };
 }
 
 // 공유 모달
@@ -821,37 +885,115 @@ function openShareModal() {
 }
 function closeModal() { modal.hidden = true; }
 
-// ── 신디사이저(음색 편집) 모달 ─────────────────────────────────
-function openSynthModal(track) {
-  if (!track.params) track.params = defaultParams();
-  const p = track.params;
+// ── 신디사이저: 소리 관리자 + 음색 편집기 ─────────────────────
+const WAVE_LABEL = { sine: "사인 ∿", triangle: "삼각 △", square: "사각 ⊓", sawtooth: "톱니 ◺" };
 
-  modalTitle.textContent = "🎹 「" + track.name + "」 음색";
+// 소리 목록 관리자: 추가/편집/이름변경/삭제
+function openSoundManager() {
+  modalTitle.textContent = "🎹 소리 (신디사이저)";
   modalBody.innerHTML = "";
 
   const intro = document.createElement("p");
-  intro.textContent = "슬라이더를 움직이면 소리에 바로 반영됩니다. 미리듣기로 확인하세요. (저장·공유에도 함께 담깁니다)";
+  intro.textContent = "소리를 만들어 트랙에 끼울 수 있어요. 소리를 누르면 음색을 편집합니다. 만든 소리는 저장·공유에 함께 담깁니다.";
   modalBody.appendChild(intro);
 
-  // 파형 고르기
+  const addBtn = document.createElement("button");
+  addBtn.className = "new-song"; // 전체폭 강조 버튼 스타일 재사용
+  addBtn.textContent = "＋ 새 소리";
+  addBtn.addEventListener("click", () => { const s = newSound(); markDirty(); render(); openSoundEditor(s); });
+  modalBody.appendChild(addBtn);
+
+  const list = document.createElement("div");
+  list.className = "session-list";
+  if (soundLib.length === 0) {
+    const e = document.createElement("p");
+    e.style.cssText = "color:var(--muted);font-size:13px;padding:8px;";
+    e.textContent = "아직 만든 소리가 없습니다. ＋ 새 소리를 눌러 만들어 보세요.";
+    list.appendChild(e);
+  }
+  for (const snd of soundLib) {
+    const item = document.createElement("div");
+    item.className = "session-item";
+    const main = document.createElement("button");
+    main.className = "s-main";
+    const usedBy = tracks.filter((t) => t.instrument === "snd:" + snd.id).length;
+    main.innerHTML = `<span class="s-name">🎹 ${escapeHtml(snd.name)}</span>
+      <span class="s-time">${WAVE_LABEL[snd.wave] || snd.wave} · 컷오프 ${Math.round(snd.cutoff)}Hz${usedBy ? ` · 트랙 ${usedBy}개 사용` : ""}</span>`;
+    main.addEventListener("click", () => openSoundEditor(snd));
+    item.appendChild(main);
+
+    const ren = document.createElement("button");
+    ren.className = "s-act"; ren.textContent = "✎"; ren.title = "이름 변경";
+    ren.addEventListener("click", (e) => { e.stopPropagation(); startSoundRename(item, main, snd); });
+    item.appendChild(ren);
+
+    const del = document.createElement("button");
+    del.className = "s-act"; del.textContent = "🗑"; del.title = "삭제";
+    del.addEventListener("click", (e) => { e.stopPropagation(); deleteSound(snd); });
+    item.appendChild(del);
+
+    list.appendChild(item);
+  }
+  modalBody.appendChild(list);
+  modal.hidden = false;
+}
+
+function startSoundRename(item, mainBtn, snd) {
+  const input = document.createElement("input");
+  input.className = "s-rename";
+  input.value = snd.name;
+  mainBtn.replaceWith(input);
+  input.focus(); input.select();
+  const commit = () => {
+    snd.name = input.value.trim() || snd.name;
+    markDirty(); render(); openSoundManager();
+  };
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") commit();
+    else if (e.key === "Escape") openSoundManager();
+  });
+  input.addEventListener("blur", commit);
+}
+
+function deleteSound(snd) {
+  soundLib = soundLib.filter((s) => s.id !== snd.id);
+  // 이 소리를 쓰던 트랙은 피아노로 되돌린다
+  for (const t of tracks) if (t.instrument === "snd:" + snd.id) { t.instrument = "piano"; t.synth = buildSynth(t); }
+  markDirty(); render(); openSoundManager();
+  showToast(`「${snd.name}」 삭제됨`);
+}
+
+// 음색 편집기: 소리 하나의 파형·ADSR·컷오프·볼륨을 편집(그 소리를 쓰는 트랙에 즉시 반영)
+function openSoundEditor(sound) {
+  modalTitle.textContent = "🎹 " + sound.name;
+  modalBody.innerHTML = "";
+
+  const back = document.createElement("button");
+  back.textContent = "‹ 소리 목록";
+  back.style.marginBottom = "10px";
+  back.addEventListener("click", openSoundManager);
+  modalBody.appendChild(back);
+
+  const intro = document.createElement("p");
+  intro.textContent = "슬라이더를 움직이면 이 소리를 쓰는 트랙에 바로 반영됩니다. 미리듣기로 확인하세요.";
+  modalBody.appendChild(intro);
+
   const waveRow = document.createElement("div");
   waveRow.className = "wave-row";
-  const WAVE_LABEL = { sine: "사인 ∿", triangle: "삼각 △", square: "사각 ⊓", sawtooth: "톱니 ◺" };
   for (const w of WAVE_LIST) {
     const b = document.createElement("button");
-    b.className = "wave-btn" + (p.wave === w ? " on" : "");
+    b.className = "wave-btn" + (sound.wave === w ? " on" : "");
     b.textContent = WAVE_LABEL[w];
     b.addEventListener("click", () => {
-      p.wave = w;
+      sound.wave = w;
       waveRow.querySelectorAll(".wave-btn").forEach((x) => x.classList.remove("on"));
       b.classList.add("on");
-      applyParamsLive(track); markDirty(); playPreview(track);
+      applySoundToTracks(sound); markDirty(); playSoundPreview(sound);
     });
     waveRow.appendChild(b);
   }
   addField("파형", waveRow);
 
-  // ADSR + 필터 + 볼륨 슬라이더
   slider("어택 (시작 빠르기)", "attack", 0, 2, 0.005, "s", (v) => v.toFixed(3));
   slider("디케이 (감쇠)", "decay", 0, 2, 0.005, "s", (v) => v.toFixed(3));
   slider("서스테인 (지속 크기)", "sustain", 0, 1, 0.01, "", (v) => v.toFixed(2));
@@ -863,14 +1005,14 @@ function openSynthModal(track) {
   btnRow.className = "share-row";
   const prev = document.createElement("button");
   prev.textContent = "▶ 미리듣기";
-  prev.addEventListener("click", () => playPreview(track));
+  prev.addEventListener("click", () => playSoundPreview(sound));
   const reset = document.createElement("button");
   reset.textContent = "기본값";
   reset.addEventListener("click", () => {
-    track.params = defaultParams();
-    applyParamsLive(track); markDirty();
-    openSynthModal(track); // 슬라이더 위치 갱신
-    playPreview(track);
+    Object.assign(sound, defaultParams());
+    applySoundToTracks(sound); markDirty();
+    openSoundEditor(sound); // 슬라이더 위치 갱신
+    playSoundPreview(sound);
   });
   btnRow.appendChild(prev);
   btnRow.appendChild(reset);
@@ -894,14 +1036,14 @@ function openSynthModal(track) {
     const input = document.createElement("input");
     input.type = "range";
     input.min = min; input.max = max; input.step = step;
-    input.value = p[key];
+    input.value = sound[key];
     const val = document.createElement("span");
     val.className = "synth-val";
-    val.textContent = fmt(p[key]) + unit;
+    val.textContent = fmt(sound[key]) + unit;
     input.addEventListener("input", () => {
-      p[key] = Number(input.value);
-      val.textContent = fmt(p[key]) + unit;
-      applyParamsLive(track); markDirty();
+      sound[key] = Number(input.value);
+      val.textContent = fmt(sound[key]) + unit;
+      applySoundToTracks(sound); markDirty();
     });
     control.appendChild(input);
     control.appendChild(val);
@@ -909,12 +1051,17 @@ function openSynthModal(track) {
   }
 }
 
-// 커스텀 트랙 음색 미리듣기: 짧은 코드 한 번
-async function playPreview(track) {
+// 소리 미리듣기: 그 소리로 임시 신스를 만들어 짧은 코드 한 번
+async function playSoundPreview(sound) {
   await Tone.start();
-  if (track.synth && track.synth.poly) {
-    track.synth.poly.triggerAttackRelease(["C4", "E4", "G4"], "8n");
-  }
+  const filt = new Tone.Filter(sound.cutoff, "lowpass").toDestination();
+  const poly = new Tone.PolySynth(Tone.Synth, {
+    oscillator: { type: sound.wave },
+    envelope: { attack: sound.attack, decay: sound.decay, sustain: sound.sustain, release: sound.release },
+  }).connect(filt);
+  poly.volume.value = sound.volume;
+  poly.triggerAttackRelease(["C4", "E4", "G4"], "8n");
+  setTimeout(() => { poly.dispose(); filt.dispose(); }, 1500);
 }
 
 async function copyText(text, inputEl) {
@@ -941,7 +1088,7 @@ function importFromHash() {
   try {
     const d = decodeShare(m[1]);
     const s = { id: genId(), name: d.name || "공유받은 곡", updatedAt: Date.now(),
-      data: { bpm: d.bpm, bars: d.bars, tracks: d.tracks } };
+      data: { bpm: d.bpm, bars: d.bars, sounds: d.sounds || [], tracks: d.tracks } };
     sessions.unshift(s);
     persistSessions();
     history.replaceState(null, "", location.pathname); // 주소창의 코드 정리
