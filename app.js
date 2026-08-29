@@ -36,9 +36,9 @@ function trackSound(track) {
 // ══════════════════════════════════════════════════════════════
 //  악기(신스)
 // ══════════════════════════════════════════════════════════════
-function buildSynth(track) {
-  if (track.synth) disposeSynth(track.synth);
-
+// 트랙에 맞는 신스 노드를 만든다(현재 Tone 컨텍스트 기준). 저장/해제는 하지 않는다.
+// → 재생용(buildSynth)과 WAV 오프라인 렌더 양쪽에서 재사용한다.
+function createVoices(track) {
   if (track.type === "drums") {
     const kick = new Tone.MembraneSynth().toDestination();
     const snare = new Tone.NoiseSynth({
@@ -85,6 +85,11 @@ function buildSynth(track) {
   poly.toDestination();
   poly.volume.value = -6;
   return { kind: "melody", poly };
+}
+
+function buildSynth(track) {
+  if (track.synth) disposeSynth(track.synth);
+  return createVoices(track);
 }
 
 // 커스텀 음색 기본값
@@ -618,7 +623,7 @@ const MENU = [
   { ico: "🔗", name: "링크로 공유 (다른 기기)", action: () => { closeDrawer(); openShareModal(); } },
   { ico: "🎹", name: "신디사이저 (소리 만들기·편집)", action: () => { closeDrawer(); openSoundManager(); } },
   { ico: "⚙️", name: "환경설정", tag: "준비 중" },
-  { ico: "📤", name: "WAV로 내보내기", tag: "예정" },
+  { ico: "📤", name: "WAV로 내보내기", action: () => { closeDrawer(); exportWav(); } },
   { ico: "🎼", name: "오선지 악보 보기", tag: "예정" },
 ];
 
@@ -1080,6 +1085,94 @@ async function copyText(text, inputEl) {
 document.getElementById("modalClose").addEventListener("click", closeModal);
 modal.addEventListener("click", (e) => { if (e.target === modal) closeModal(); });
 document.getElementById("share").addEventListener("click", openShareModal);
+
+// ══════════════════════════════════════════════════════════════
+//  WAV로 내보내기 — 오프라인 렌더링 후 파일 다운로드 (서버 없음)
+// ══════════════════════════════════════════════════════════════
+// 한 트랙의 모든 음을 절대 시각(초)으로 오프라인 신스에 예약한다.
+function scheduleTrackOffline(track, voices, secondsPerStep) {
+  if (track.muted) return;
+  const rows = track.type === "drums" ? DRUM_ROWS : MELODY_NOTES;
+  for (let c = 0; c < steps; c++) {
+    const time = c * secondsPerStep + 0.001; // 0에 딱 붙이면 첫 음이 씹혀서 살짝 민다
+    if (track.type === "drums") {
+      for (let r = 0; r < rows.length; r++) {
+        if (!track.grid[r][c]) continue;
+        if (rows[r] === "킥") voices.kick.triggerAttackRelease("C1", 2 * secondsPerStep, time);
+        else if (rows[r] === "스네어") voices.snare.triggerAttackRelease(secondsPerStep, time);
+        else voices.hat.triggerAttackRelease(secondsPerStep / 2, time);
+      }
+    } else {
+      const notes = [];
+      for (let r = 0; r < rows.length; r++) if (track.grid[r][c]) notes.push(rows[r]);
+      if (notes.length) voices.poly.triggerAttackRelease(notes, secondsPerStep, time);
+    }
+  }
+}
+
+// AudioBuffer → 16비트 PCM WAV Blob
+function audioBufferToWav(buf) {
+  const numCh = buf.numberOfChannels;
+  const sampleRate = buf.sampleRate;
+  const frames = buf.length;
+  const blockAlign = numCh * 2;
+  const dataSize = frames * blockAlign;
+  const out = new ArrayBuffer(44 + dataSize);
+  const view = new DataView(out);
+  let p = 0;
+  const wStr = (s) => { for (let i = 0; i < s.length; i++) view.setUint8(p++, s.charCodeAt(i)); };
+  const wU32 = (v) => { view.setUint32(p, v, true); p += 4; };
+  const wU16 = (v) => { view.setUint16(p, v, true); p += 2; };
+  wStr("RIFF"); wU32(36 + dataSize); wStr("WAVE");
+  wStr("fmt "); wU32(16); wU16(1); wU16(numCh); wU32(sampleRate); wU32(sampleRate * blockAlign); wU16(blockAlign); wU16(16);
+  wStr("data"); wU32(dataSize);
+  const chans = [];
+  for (let c = 0; c < numCh; c++) chans.push(buf.getChannelData(c));
+  for (let i = 0; i < frames; i++) {
+    for (let c = 0; c < numCh; c++) {
+      let s = Math.max(-1, Math.min(1, chans[c][i]));
+      view.setInt16(p, s < 0 ? s * 0x8000 : s * 0x7fff, true); p += 2;
+    }
+  }
+  return new Blob([out], { type: "audio/wav" });
+}
+
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click();
+  setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 1000);
+}
+
+let exporting = false;
+async function exportWav() {
+  if (exporting) return;
+  const anyNote = tracks.some((t) => t.grid.some((row) => row.some(Boolean)));
+  if (!anyNote) { showToast("먼저 음을 찍어 주세요"); return; }
+  exporting = true;
+  showToast("WAV 만드는 중…");
+  try {
+    const secondsPerStep = (60 / Number(bpm.value)) / 4; // 16분음표 길이
+    const duration = steps * secondsPerStep + 2;         // 뒤에 여운 2초
+    const buffer = await Tone.Offline(() => {
+      // 콜백 안에서 만든 Tone 노드는 오프라인 컨텍스트에 붙는다(재생용 신스는 안 건드림)
+      for (const t of tracks) scheduleTrackOffline(t, createVoices(t), secondsPerStep);
+    }, duration);
+    const audioBuf = buffer.get ? buffer.get() : buffer; // ToneAudioBuffer → AudioBuffer
+    const blob = audioBufferToWav(audioBuf);
+    const s = activeSession();
+    const base = (s ? s.name : "song").replace(/[\\/:*?"<>|]+/g, "_").trim() || "song";
+    console.log("[wav]", base + ".wav", blob.size, "bytes", duration.toFixed(2) + "s");
+    downloadBlob(blob, base + ".wav");
+    showToast("WAV 내보내기 완료 ✓");
+  } catch (e) {
+    console.error("WAV 내보내기 실패:", e);
+    showToast("WAV 내보내기 실패: " + e.message);
+  } finally {
+    exporting = false;
+  }
+}
 
 // 링크(#song=...)로 들어왔으면 새 곡으로 가져온다
 function importFromHash() {

@@ -62,7 +62,8 @@ localStorage 상태나 공유 코덱 round-trip은 `javascript_tool`로 `localSt
 
 | 섹션 | 핵심 함수 | 하는 일 |
 |---|---|---|
-| 악기(신스) | `buildSynth` `defaultParams` `applyParamsLive` `disposeSynth` `triggerTrack` `preview` | 트랙 종류/악기에 맞는 Tone 신스 생성·해제, 한 스텝 울리기 |
+| 악기(신스) | `createVoices` `buildSynth` `defaultParams` `applyParamsLive` `disposeSynth` `triggerTrack` `preview` | 트랙 종류/악기에 맞는 Tone 신스 생성·해제, 한 스텝 울리기. `createVoices`는 노드만 만들고(저장/해제 안 함) 재생·WAV 렌더 양쪽에서 재사용 |
+| WAV 내보내기 | `exportWav` `scheduleTrackOffline` `audioBufferToWav` `downloadBlob` | `Tone.Offline`로 곡을 한 번에 렌더 → 16비트 PCM WAV로 인코딩 → 다운로드 |
 | 트랙 | `makeTrackObj` `addTrack` `removeTrack` `resizeAll` `clearTracks` | 트랙 객체 생성/추가/삭제, 곡 길이 변경 시 격자 리사이즈. **트랙은 "＋ 트랙 추가"로 하나 만들고, 사운드(악기·드럼)는 트랙 헤더의 드롭다운에서 고른다** |
 | 화면 그리기 | `render` `renderTrack` | 트랙들을 DOM으로 그림(격자 셀·헤더 컨트롤). 구조 변경 때 전체 재그림 |
 | 재생 | `rebuildSequence` `highlightColumn` `clearHighlight` | `Tone.Transport`+`Tone.Sequence`로 스텝을 돌며 모든 트랙을 함께 울림, 재생 위치 표시 |
@@ -144,6 +145,10 @@ trackData = {
 ## 규칙 · 이미 겪은 함정 (되풀이하지 말 것)
 
 - **오디오는 사용자 제스처 뒤에만 시작된다.** 재생/미리듣기 클릭 핸들러에서 `await Tone.start()`를 먼저 부른다.
+  (WAV 내보내기는 `Tone.Offline`이라 제스처가 필요 없다.)
+- **WAV 오프라인 렌더는 재생용 신스를 건드리면 안 된다.** `Tone.Offline` 콜백 안에서 `createVoices(track)`로
+  오프라인 컨텍스트 전용 신스를 새로 만든다(`buildSynth`는 `track.synth`를 dispose하므로 여기서 쓰지 말 것).
+  다운로드(`downloadBlob`의 `<a download>`)는 실제 페이지에선 되지만 Artifact/샌드박스에선 막힐 수 있다.
 - **자동 저장은 디바운스(400ms)다.** `markDirty()`가 예약하고 `saveActive()`가 실제 저장.
   곡을 전환하기 전엔 `flushSave()`로 확실히 밀어 넣는다. **저장 직후 바로 localStorage를 읽으면 아직
   안 써져 있을 수 있다**(테스트할 때 디바운스만큼 기다릴 것 — 실제로 "직전 상태를 읽는" 착오를 겪었다).
