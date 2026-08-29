@@ -236,18 +236,24 @@ button.primary { background: var(--accent); color: #0b1020; font-weight: 600; bo
   overflow-x: auto;
   padding-bottom: 2px;
 }
-/* 멜로디 격자는 넓은 음역 중 일부만 보이는 세로 스크롤 뷰 (드래그·휠로 위아래 이동) */
-.grid.scrolly {
+/* 멜로디 격자: 가로·세로 스크롤을 각각 다른 컨테이너로 분리한다.
+   한 요소가 두 축을 다 맡으면 모바일이 첫 방향으로 축을 고정해 가로가 막히는 문제가 있어,
+   세로(vscroll)·가로(hscroll)를 중첩하고 각각 한 축만 touch-action으로 허용한다. */
+.vscroll {
   overflow-y: auto;
   max-height: 344px;              /* 약 13줄 */
   overscroll-behavior: contain;
-  touch-action: pan-x pan-y;     /* 모바일: 가로·세로 둘 다 드래그로 스크롤 */
+  touch-action: pan-y;            /* 세로 드래그만 이 컨테이너가 처리 */
 }
-.grid.scrolly .label-cell {
-  position: sticky;              /* 스크롤해도 음이름 열은 왼쪽에 고정 */
-  left: 0;
-  background: var(--panel);
-  z-index: 1;
+.hscroll {
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  touch-action: pan-x;            /* 가로 드래그만 이 컨테이너가 처리 */
+  padding-bottom: 2px;
+}
+.grid.in-scroller {               /* 스크롤은 바깥 컨테이너가 맡으므로 격자는 넘치게 둔다 */
+  overflow: visible;
+  max-height: none;
 }
 .label-cell {
   color: var(--muted);

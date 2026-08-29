@@ -328,7 +328,7 @@ function renderTrack(track) {
   wrap.appendChild(head);
 
   const grid = document.createElement("div");
-  grid.className = "grid" + (track.type === "melody" ? " scrolly" : ""); // 멜로디는 세로 스크롤
+  grid.className = "grid" + (track.type === "melody" ? " in-scroller" : "");
   grid.style.gridTemplateColumns = `auto repeat(${steps}, 1fr)`;
 
   track.cellEls = [];
@@ -359,43 +359,57 @@ function renderTrack(track) {
   });
 
   if (track.type === "melody") {
-    enableDragScroll(grid);
-    // 스크롤 위치 유지(전에 본 위치가 있으면 그대로, 없으면 기본 음역으로)
-    grid.addEventListener("scroll", () => { track._scrollTop = grid.scrollTop; });
+    // 세로(vscroll) · 가로(hscroll)를 분리 — 모바일 축 고정 충돌 방지
+    const hscroll = document.createElement("div");
+    hscroll.className = "hscroll";
+    hscroll.appendChild(grid);
+    const vscroll = document.createElement("div");
+    vscroll.className = "vscroll";
+    vscroll.appendChild(hscroll);
+
+    enableDragScroll(vscroll, grid);   // 마우스 세로 드래그(그리고 grid._dragged로 클릭 취소)
+    vscroll.addEventListener("scroll", () => { track._scrollTop = vscroll.scrollTop; });
+    hscroll.addEventListener("scroll", () => { track._scrollLeft = hscroll.scrollLeft; });
+
     const rowH = 26; // 셀 24 + 간격 2
     const initTop = track._scrollTop != null ? track._scrollTop : Math.max(0, MELODY_NOTES.indexOf(DEFAULT_TOP_NOTE) * rowH);
-    requestAnimationFrame(() => { grid.scrollTop = initTop; });
-  }
+    requestAnimationFrame(() => {
+      vscroll.scrollTop = initTop;
+      if (track._scrollLeft != null) hscroll.scrollLeft = track._scrollLeft;
+    });
 
-  wrap.appendChild(grid);
+    wrap.appendChild(vscroll);
+  } else {
+    wrap.appendChild(grid);
+  }
   return wrap;
 }
 
-// 마우스로 격자를 끌면 세로 스크롤(음역 이동). 터치는 브라우저 기본 스크롤에 맡긴다.
-// 이동 문턱(6px)을 넘으면 드래그로 보고 셀 클릭(음 찍기)을 취소한다.
-function enableDragScroll(grid) {
+// 마우스로 세로 컨테이너를 끌면 스크롤(음역 이동). 터치는 브라우저 기본 스크롤(pan-y)에 맡긴다.
+// 이동 문턱(6px)을 넘으면 드래그로 보고 셀 클릭(음 찍기)을 취소한다(flagEl._dragged).
+function enableDragScroll(scrollEl, flagEl) {
   let st = null;
-  grid.addEventListener("pointerdown", (e) => {
+  scrollEl.addEventListener("pointerdown", (e) => {
     if (e.pointerType !== "mouse" || e.button !== 0) return; // 터치/펜은 기본 스크롤
-    st = { y: e.clientY, top: grid.scrollTop, moved: false };
-    grid._dragged = false;
+    st = { y: e.clientY, top: scrollEl.scrollTop, moved: false };
+    flagEl._dragged = false;
   });
-  grid.addEventListener("pointermove", (e) => {
+  scrollEl.addEventListener("pointermove", (e) => {
     if (!st) return;
     const dy = e.clientY - st.y;
     if (!st.moved && Math.abs(dy) < 6) return;
     st.moved = true;
-    grid._dragged = true;
-    grid.scrollTop = st.top - dy;
-    try { grid.setPointerCapture(e.pointerId); } catch {}
+    flagEl._dragged = true;
+    scrollEl.scrollTop = st.top - dy;
+    try { scrollEl.setPointerCapture(e.pointerId); } catch {}
     e.preventDefault();
   });
   const end = () => {
-    if (st && st.moved) setTimeout(() => { grid._dragged = false; }, 0); // 클릭 취소 후 해제
+    if (st && st.moved) setTimeout(() => { flagEl._dragged = false; }, 0);
     st = null;
   };
-  grid.addEventListener("pointerup", end);
-  grid.addEventListener("pointercancel", end);
+  scrollEl.addEventListener("pointerup", end);
+  scrollEl.addEventListener("pointercancel", end);
 }
 
 // ══════════════════════════════════════════════════════════════
