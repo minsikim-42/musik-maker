@@ -241,7 +241,7 @@ button.primary { background: var(--accent); color: #0b1020; font-weight: 600; bo
   overflow-y: auto;
   max-height: 344px;              /* 약 13줄 */
   overscroll-behavior: contain;
-  touch-action: pan-y;           /* 모바일: 세로 드래그로 스크롤 */
+  touch-action: pan-x pan-y;     /* 모바일: 가로·세로 둘 다 드래그로 스크롤 */
 }
 .grid.scrolly .label-cell {
   position: sticky;              /* 스크롤해도 음이름 열은 왼쪽에 고정 */
