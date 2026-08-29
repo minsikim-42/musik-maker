@@ -255,6 +255,7 @@ function makeTrackObj(type, data) {
     instrument,
     name: data?.name ?? ("트랙 " + trackSeq),
     muted: data?.muted ?? false,
+    collapsed: data?.collapsed ?? false,
     grid: null,
     synth: null,
     cellEls: null,
@@ -291,6 +292,30 @@ function removeTrack(id) {
   markDirty();
 }
 
+// 트랙 순서 이동(위 -1 / 아래 +1)
+function moveTrack(track, dir) {
+  const i = tracks.indexOf(track);
+  const j = i + dir;
+  if (i < 0 || j < 0 || j >= tracks.length) return;
+  tracks.splice(i, 1);
+  tracks.splice(j, 0, track);
+  render();
+  markDirty();
+}
+
+// 트랙 이름 인라인 변경
+function startTrackRename(head, nameSpan, renBtn, track) {
+  const input = document.createElement("input");
+  input.className = "t-rename";
+  input.value = track.name;
+  nameSpan.replaceWith(input);
+  renBtn.style.display = "none";
+  input.focus(); input.select();
+  const commit = () => { track.name = input.value.trim() || track.name; render(); markDirty(); };
+  input.addEventListener("keydown", (e) => { if (e.key === "Enter") commit(); else if (e.key === "Escape") render(); });
+  input.addEventListener("blur", commit);
+}
+
 function resizeAll() {
   steps = bars * STEPS_PER_BAR;
   for (const t of tracks) {
@@ -323,12 +348,47 @@ function render() {
 
 function renderTrack(track) {
   const rows = track.type === "drums" ? DRUM_ROWS : MELODY_NOTES;
+  const collapsed = !!track.collapsed;
   const wrap = document.createElement("section");
-  wrap.className = "track" + (track.muted ? " muted" : "");
+  wrap.className = "track" + (track.muted ? " muted" : "") + (collapsed ? " collapsed" : "");
 
   const head = document.createElement("div");
   head.className = "track-head";
-  head.innerHTML = `<span class="name">${track.name}</span><span class="spacer"></span>`;
+
+  // 접기/펼치기 토글
+  const toggle = document.createElement("button");
+  toggle.className = "t-collapse";
+  toggle.textContent = collapsed ? "▸" : "▾";
+  toggle.title = collapsed ? "펼치기" : "접기";
+  toggle.addEventListener("click", () => { track.collapsed = !track.collapsed; render(); markDirty(); });
+  head.appendChild(toggle);
+
+  // 이름 + 이름 변경(✎)
+  const nameSpan = document.createElement("span");
+  nameSpan.className = "name";
+  nameSpan.textContent = track.name;
+  head.appendChild(nameSpan);
+  if (!collapsed) {
+    const renBtn = document.createElement("button");
+    renBtn.className = "t-icon"; renBtn.textContent = "✎"; renBtn.title = "이름 변경";
+    renBtn.addEventListener("click", () => startTrackRename(head, nameSpan, renBtn, track));
+    head.appendChild(renBtn);
+  }
+
+  // 순서 이동(▲▼)
+  const idx = tracks.indexOf(track);
+  const up = document.createElement("button");
+  up.className = "t-icon"; up.textContent = "▲"; up.title = "위로";
+  up.disabled = idx <= 0;
+  up.addEventListener("click", () => moveTrack(track, -1));
+  const down = document.createElement("button");
+  down.className = "t-icon"; down.textContent = "▼"; down.title = "아래로";
+  down.disabled = idx >= tracks.length - 1;
+  down.addEventListener("click", () => moveTrack(track, 1));
+  head.appendChild(up);
+  head.appendChild(down);
+
+  head.appendChild(Object.assign(document.createElement("span"), { className: "spacer" }));
 
   // 사운드(악기) 선택 — 모든 트랙 공통. 기본 악기 + 내가 만든 소리 + 드럼.
   // 드럼↔멜로디는 격자 줄 구성이 달라서 바꾸면 그 트랙의 격자는 새로 시작된다.
@@ -362,8 +422,8 @@ function renderTrack(track) {
   });
   head.appendChild(sel);
 
-  // 커스텀 소리를 쓰는 트랙이면 그 소리를 바로 편집하는 버튼
-  if (track.type === "melody" && trackSound(track)) {
+  // 커스텀 소리를 쓰는 트랙이면 그 소리를 바로 편집하는 버튼(펼친 상태에서만)
+  if (!collapsed && track.type === "melody" && trackSound(track)) {
     const toneBtn = document.createElement("button");
     toneBtn.textContent = "🎹 음색";
     toneBtn.addEventListener("click", () => openSoundEditor(trackSound(track)));
@@ -375,18 +435,22 @@ function renderTrack(track) {
   muteBtn.addEventListener("click", () => { track.muted = !track.muted; render(); markDirty(); });
   head.appendChild(muteBtn);
 
-  const delBtn = document.createElement("button");
-  delBtn.textContent = "삭제";
-  delBtn.addEventListener("click", () => removeTrack(track.id));
-  head.appendChild(delBtn);
+  if (!collapsed) {
+    const delBtn = document.createElement("button");
+    delBtn.textContent = "삭제";
+    delBtn.addEventListener("click", () => removeTrack(track.id));
+    head.appendChild(delBtn);
+  }
 
   wrap.appendChild(head);
+
+  track.cellEls = [];
+  if (collapsed) return wrap; // 접힘: 헤더(이름·음원·음소거·순서)만, 격자는 그리지 않음
 
   const grid = document.createElement("div");
   grid.className = "grid in-scroller"; // 스크롤은 바깥 hscroll/vscroll이 맡는다
   grid.style.gridTemplateColumns = `auto repeat(${steps}, 1fr)`;
 
-  track.cellEls = [];
   rows.forEach((rowName, r) => {
     const label = document.createElement("div");
     label.className = "label-cell" + (track.type === "melody" && isSharp(rowName) ? " sharp" : "");
@@ -531,6 +595,7 @@ function serialize() {
       instrument: t.instrument, // 기본악기 | null(드럼) | "snd:<id>"
       name: t.name,
       muted: t.muted,
+      collapsed: !!t.collapsed,
       grid: t.grid.map((row) => row.slice()),
     })),
   };

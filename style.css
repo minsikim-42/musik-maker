@@ -236,19 +236,30 @@ button.primary { background: var(--accent); color: #0b1020; font-weight: 600; bo
 .track-head {
   display: flex;
   align-items: center;
-  gap: 10px;
+  flex-wrap: wrap;
+  gap: 8px;
   margin-bottom: 8px;
 }
-.track-head .kind {
-  font-size: 11px;
-  color: var(--muted);
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  padding: 2px 8px;
-}
+.track.collapsed .track-head { margin-bottom: 0; }
 .track-head .name { font-weight: 600; }
 .track-head .spacer { flex: 1; }
 .track-head select, .track-head button { padding: 6px 10px; }
+/* 작은 아이콘 버튼(접기·이름변경·순서) */
+.track-head .t-collapse, .track-head .t-icon {
+  padding: 4px 8px;
+  min-width: 30px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.track-head .t-collapse { font-size: 13px; }
+.track-head .t-icon:disabled { opacity: .3; cursor: default; }
+.track-head .t-icon:disabled:hover { border-color: var(--line); }
+.track-head .t-rename {
+  font: inherit; font-weight: 600;
+  background: #10141c; border: 1px solid var(--accent);
+  border-radius: 6px; padding: 4px 8px; color: var(--text);
+  min-width: 120px;
+}
 
 .grid {
   display: grid;
