@@ -441,16 +441,25 @@ function renderTrack(track) {
     head.appendChild(toneBtn);
   }
 
-  // 트랙 볼륨(소리 크기) — 접힘/펼침 모두 표시(믹싱)
-  const volWrap = document.createElement("label");
+  // 트랙 볼륨(소리 크기) — 접힘/펼침 모두 표시(믹싱). 숫자 + 초기화 버튼 포함.
+  const fmtDb = (v) => (v > 0 ? "+" : "") + Math.round(v) + "dB";
+  const volWrap = document.createElement("div");
   volWrap.className = "t-vol";
   volWrap.title = "트랙 소리 크기";
   const volIn = document.createElement("input");
   volIn.type = "range"; volIn.min = -30; volIn.max = 6; volIn.step = 1;
   volIn.value = track.volume ?? 0;
-  volIn.addEventListener("input", () => { setTrackVolume(track, Number(volIn.value)); markDirty(); });
+  const volVal = document.createElement("span");
+  volVal.className = "t-vol-val";
+  volVal.textContent = fmtDb(track.volume ?? 0);
+  volIn.addEventListener("input", () => { setTrackVolume(track, Number(volIn.value)); volVal.textContent = fmtDb(volIn.value); markDirty(); });
+  const volReset = document.createElement("button");
+  volReset.className = "t-icon"; volReset.textContent = "↺"; volReset.title = "볼륨 초기화 (0dB)";
+  volReset.addEventListener("click", () => { volIn.value = 0; setTrackVolume(track, 0); volVal.textContent = fmtDb(0); markDirty(); });
   volWrap.appendChild(Object.assign(document.createElement("span"), { className: "t-vol-ico", textContent: "🔊" }));
   volWrap.appendChild(volIn);
+  volWrap.appendChild(volVal);
+  volWrap.appendChild(volReset);
   head.appendChild(volWrap);
 
   const muteBtn = document.createElement("button");
@@ -639,9 +648,7 @@ function deserialize(data) {
   bars = data.bars || 2;
   steps = bars * STEPS_PER_BAR;
   barsSel.value = String(bars);
-  bpm.value = String(data.bpm || 120);
-  bpmVal.textContent = bpm.value;
-  Tone.Transport.bpm.value = Number(bpm.value);
+  setBpm(data.bpm || 120, { silent: true }); // 곡 로드 시 템포 반영(저장 유발 안 함)
 
   for (const td of data.tracks || []) tracks.push(makeTrackObj(td.type, td));
   render();
@@ -818,9 +825,18 @@ function escapeHtml(str) {
 //  컨트롤 배선
 // ══════════════════════════════════════════════════════════════
 const bpm = document.getElementById("bpm");
-const bpmVal = document.getElementById("bpmVal");
+const bpmNum = document.getElementById("bpmNum");
 const barsSel = document.getElementById("bars");
 const songNameEl = document.getElementById("songName");
+
+// 템포 설정: 슬라이더·숫자입력을 함께 맞추고 Transport에 반영(40~220 클램프)
+function setBpm(v, opts = {}) {
+  v = Math.max(40, Math.min(220, Math.round(Number(v) || 120)));
+  bpm.value = String(v);
+  if (!opts.keepNum) bpmNum.value = String(v);
+  Tone.Transport.bpm.value = v;
+  if (!opts.silent) markDirty();
+}
 
 document.getElementById("play").addEventListener("click", async () => {
   await Tone.start();
@@ -834,11 +850,13 @@ document.getElementById("stop").addEventListener("click", () => {
   if (seq) seq.stop();
   clearHighlight();
 });
-bpm.addEventListener("input", () => {
-  bpmVal.textContent = bpm.value;
-  Tone.Transport.bpm.value = Number(bpm.value);
-  markDirty();
+bpm.addEventListener("input", () => setBpm(bpm.value));
+// 숫자 입력: 타이핑 중엔 필드를 건드리지 않고(범위 내면 반영), 확정(blur/Enter) 때 클램프
+bpmNum.addEventListener("input", () => {
+  const n = Number(bpmNum.value);
+  if (n >= 40 && n <= 220) setBpm(n, { keepNum: true });
 });
+bpmNum.addEventListener("change", () => setBpm(bpmNum.value));
 barsSel.addEventListener("change", (e) => { bars = Number(e.target.value); resizeAll(); });
 // 트랙 추가: 일단 만들고, 사운드(악기·드럼)는 트랙에서 고른다
 document.getElementById("addTrack").addEventListener("click", () => addTrack("melody"));
