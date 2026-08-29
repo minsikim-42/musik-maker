@@ -99,6 +99,11 @@ sound = { id, name, wave:"sine|triangle|square|sawtooth", attack, decay, sustain
 - 곡마다 `data.sounds` 배열(런타임 전역 `soundLib`). 사용자가 신디사이저에서 만든다.
 - 범위는 `PARAM_RANGES`. 편집은 `applySoundToTracks`→`applyParamsLive`가 `poly.set`으로 **즉시 반영**(재생성 없음).
 - 트랙은 소리를 **id로 참조**(`instrument="snd:<id>"`)한다 → 소리 하나를 고치면 그 소리를 쓰는 모든 트랙이 바뀐다.
+- **오디오 샘플 소리**: `{ id, name, kind:"sample", audio:<dataURL>, baseNote, volume }`. `Tone.Sampler`로 한 샘플을
+  음정에 맞춰 재생. 디코드 버퍼는 전역 `sampleBuffers`(id→ToneAudioBuffer)에 캐시하고 로드는 비동기 —
+  로드 전 `createVoices`는 무음 폴백을 주고, 로드되면 그 소리를 쓰는 트랙을 `buildSynth`로 재생성한다.
+  세션엔 data URL로 저장(1.5MB 제한, localStorage). **공유 링크엔 안 담긴다** — `encodeShare`가 샘플 소리를
+  기본 신스 파라미터로 인코딩(수신 측은 신스로 들린다).
 - 신디사이저 UI = **소리 관리자**(`openSoundManager`: 추가/이름변경/삭제) + **음색 편집기**(`openSoundEditor`:
   슬라이더). 둘 다 공유 `#modal`. 소리를 지우면 그 소리를 쓰던 트랙은 피아노로 되돌린다.
 

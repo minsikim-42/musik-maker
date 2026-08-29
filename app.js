@@ -44,6 +44,23 @@ function trackSound(track) {
   return track.instrument && track.instrument.startsWith("snd:") ? findSound(track.instrument.slice(4)) : null;
 }
 
+// 오디오 샘플 소리: { id, name, kind:"sample", audio:<dataURL>, baseNote:"C4", volume }
+// 디코드된 버퍼는 여기 캐시한다(id → Tone.ToneAudioBuffer). 로드는 비동기.
+const sampleBuffers = {};
+function loadSampleBuffer(sound) {
+  if (!sound || sound.kind !== "sample" || !sound.audio) return;
+  const cached = sampleBuffers[sound.id];
+  if (cached && cached.loaded) return;
+  const buf = new Tone.ToneAudioBuffer(
+    sound.audio,
+    () => { // 로드되면 이 소리를 쓰는 트랙 신스를 다시 만든다(폴백 → 샘플러)
+      for (const t of tracks) if (t.instrument === "snd:" + sound.id) t.synth = buildSynth(t);
+    },
+    (e) => console.warn("샘플 로드 실패:", e)
+  );
+  sampleBuffers[sound.id] = buf;
+}
+
 // ══════════════════════════════════════════════════════════════
 //  악기(신스)
 // ══════════════════════════════════════════════════════════════
@@ -86,9 +103,24 @@ function createVoices(track, out) {
     return { kind: "drums", kick, snare, hat, hatOut };
   }
 
-  // 커스텀 소리(라이브러리 참조): 사용자가 만든 음색. 로우패스 필터로 컷오프까지 조절.
+  // 커스텀 소리(라이브러리 참조)
   const snd = trackSound(track);
+  if (snd && snd.kind === "sample") {
+    // 오디오 샘플: 한 샘플을 음정에 맞춰 재생(Tone.Sampler). 버퍼가 준비됐을 때만.
+    const buf = sampleBuffers[snd.id];
+    if (buf && buf.loaded) {
+      const sampler = new Tone.Sampler({ urls: { [snd.baseNote || "C4"]: buf } }).connect(out);
+      sampler.volume.value = snd.volume ?? -6;
+      return { kind: "melody", poly: sampler }; // Sampler도 triggerAttackRelease(note,dur,time) 동일
+    }
+    // 아직 로딩 전 → 조용한 폴백(로드되면 loadSampleBuffer가 재생성)
+    loadSampleBuffer(snd);
+    const silent = new Tone.PolySynth(Tone.Synth).connect(out);
+    silent.volume.value = -60;
+    return { kind: "melody", poly: silent };
+  }
   if (snd) {
+    // 신스 소리: 사용자가 만든 음색. 로우패스 필터로 컷오프까지 조절.
     const filt = new Tone.Filter(snd.cutoff, "lowpass").connect(out);
     const poly = new Tone.PolySynth(Tone.Synth, {
       oscillator: { type: snd.wave },
@@ -309,7 +341,7 @@ function renderTrack(track) {
     sel.appendChild(o);
   };
   for (const [val, lbl] of [["piano", "피아노"], ["synth", "신스"], ["pluck", "플럭"], ["bass", "베이스"], ["guitar", "기타(통기타)"], ["wind", "클라리넷"]]) addOpt(val, lbl);
-  for (const snd of soundLib) addOpt("snd:" + snd.id, "🎹 " + snd.name);
+  for (const snd of soundLib) addOpt("snd:" + snd.id, (snd.kind === "sample" ? "🎵 " : "🎹 ") + snd.name);
   addOpt("__manage", "🎹 소리 만들기·편집…");
   addOpt("drums", "드럼");
 
@@ -513,6 +545,7 @@ function deserialize(data) {
 
   // 소리 라이브러리 먼저 복원(트랙이 참조하므로). 누락 필드는 기본값으로 채운다.
   soundLib = (data.sounds || []).map((s) => ({ ...defaultParams(), ...s }));
+  for (const s of soundLib) loadSampleBuffer(s); // 오디오 샘플은 미리 디코드
 
   bars = data.bars || 2;
   steps = bars * STEPS_PER_BAR;
@@ -1011,6 +1044,14 @@ function openShareModal() {
     row.appendChild(copyBtn);
     modalBody.appendChild(row);
 
+    // 오디오 샘플이 있으면 링크에 안 담긴다는 안내
+    if (soundLib.some((s) => s.kind === "sample")) {
+      const sn = document.createElement("p");
+      sn.className = "share-note";
+      sn.textContent = "⚠ 오디오 샘플 소리는 용량이 커서 링크에 담기지 않습니다. 링크를 연 기기에서는 그 소리가 신스 소리로 대체됩니다.";
+      modalBody.appendChild(sn);
+    }
+
     // localhost면 다른 기기에서 안 열린다는 안내
     if (/^(localhost|127\.|0\.0\.0\.0)/.test(location.hostname) || location.protocol === "file:") {
       const note = document.createElement("p");
@@ -1041,6 +1082,20 @@ function openSoundManager() {
   addBtn.addEventListener("click", () => { const s = newSound(); markDirty(); render(); openSoundEditor(s); });
   modalBody.appendChild(addBtn);
 
+  // 오디오 파일에서 소리 만들기
+  const upRow = document.createElement("div");
+  upRow.className = "share-row";
+  const upBtn = document.createElement("button");
+  upBtn.textContent = "🎵 오디오 파일에서";
+  upBtn.style.flex = "1";
+  const fileInput = document.createElement("input");
+  fileInput.type = "file"; fileInput.accept = "audio/*"; fileInput.style.display = "none";
+  fileInput.addEventListener("change", (e) => { onSampleFile(e.target.files && e.target.files[0]); e.target.value = ""; });
+  upBtn.addEventListener("click", () => fileInput.click());
+  upRow.appendChild(upBtn);
+  upRow.appendChild(fileInput);
+  modalBody.appendChild(upRow);
+
   const list = document.createElement("div");
   list.className = "session-list";
   if (soundLib.length === 0) {
@@ -1055,8 +1110,12 @@ function openSoundManager() {
     const main = document.createElement("button");
     main.className = "s-main";
     const usedBy = tracks.filter((t) => t.instrument === "snd:" + snd.id).length;
-    main.innerHTML = `<span class="s-name">🎹 ${escapeHtml(snd.name)}</span>
-      <span class="s-time">${WAVE_LABEL[snd.wave] || snd.wave} · 컷오프 ${Math.round(snd.cutoff)}Hz${usedBy ? ` · 트랙 ${usedBy}개 사용` : ""}</span>`;
+    const usedTxt = usedBy ? ` · 트랙 ${usedBy}개 사용` : "";
+    const sub = snd.kind === "sample"
+      ? `오디오 샘플 · 기준 ${snd.baseNote || "C4"}${usedTxt}`
+      : `${WAVE_LABEL[snd.wave] || snd.wave} · 컷오프 ${Math.round(snd.cutoff)}Hz${usedTxt}`;
+    main.innerHTML = `<span class="s-name">${snd.kind === "sample" ? "🎵" : "🎹"} ${escapeHtml(snd.name)}</span>
+      <span class="s-time">${sub}</span>`;
     main.addEventListener("click", () => openSoundEditor(snd));
     item.appendChild(main);
 
@@ -1101,8 +1160,26 @@ function deleteSound(snd) {
   showToast(`「${snd.name}」 삭제됨`);
 }
 
-// 음색 편집기: 소리 하나의 파형·ADSR·컷오프·볼륨을 편집(그 소리를 쓰는 트랙에 즉시 반영)
+// 오디오 파일 → 샘플 소리
+function onSampleFile(file) {
+  if (!file) return;
+  if (file.size > 1.5 * 1024 * 1024) { showToast("오디오 파일이 너무 큽니다 (1.5MB 이하)"); return; }
+  const reader = new FileReader();
+  reader.onload = () => {
+    const name = (file.name || "샘플").replace(/\.[^.]+$/, "").slice(0, 40) || "샘플";
+    const s = { id: genSoundId(), name, kind: "sample", audio: reader.result, baseNote: "C4", volume: -6 };
+    soundLib.push(s);
+    loadSampleBuffer(s);
+    markDirty(); render();
+    openSoundEditor(s);
+  };
+  reader.onerror = () => showToast("오디오 파일을 읽지 못했습니다");
+  reader.readAsDataURL(file);
+}
+
+// 소리 편집기 진입 — 샘플이면 전용 편집기로
 function openSoundEditor(sound) {
+  if (sound.kind === "sample") return openSampleEditor(sound);
   modalTitle.textContent = "🎹 " + sound.name;
   modalBody.innerHTML = "";
 
@@ -1200,6 +1277,91 @@ async function playSoundPreview(sound) {
   poly.volume.value = sound.volume;
   poly.triggerAttackRelease(["C4", "E4", "G4"], "8n");
   setTimeout(() => { poly.dispose(); filt.dispose(); }, 1500);
+}
+
+// ── 오디오 샘플 소리 편집기 ────────────────────────────────────
+const SAMPLE_BASE_NOTES = ["C3", "E3", "G3", "A3", "C4", "E4", "G4", "A4", "C5"];
+function rebuildTracksUsing(sound) {
+  for (const t of tracks) if (t.instrument === "snd:" + sound.id) t.synth = buildSynth(t);
+}
+function openSampleEditor(sound) {
+  modalTitle.textContent = "🎵 " + sound.name;
+  modalBody.innerHTML = "";
+
+  const back = document.createElement("button");
+  back.textContent = "‹ 소리 목록"; back.style.marginBottom = "10px";
+  back.addEventListener("click", openSoundManager);
+  modalBody.appendChild(back);
+
+  const intro = document.createElement("p");
+  intro.textContent = "불러온 오디오를 음정에 맞춰 재생합니다. '기준 음'은 이 파일이 원래 내는 음(그 음에서 원본 그대로 나고, 다른 음은 올리거나 내려서 냅니다).";
+  modalBody.appendChild(intro);
+
+  // 기준 음
+  const baseWrap = document.createElement("label");
+  baseWrap.className = "synth-field";
+  baseWrap.innerHTML = `<div class="synth-label">기준 음</div>`;
+  const baseSel = document.createElement("select");
+  for (const n of SAMPLE_BASE_NOTES) {
+    const o = document.createElement("option"); o.value = n; o.textContent = n;
+    if ((sound.baseNote || "C4") === n) o.selected = true;
+    baseSel.appendChild(o);
+  }
+  baseSel.addEventListener("change", () => { sound.baseNote = baseSel.value; rebuildTracksUsing(sound); markDirty(); });
+  baseWrap.appendChild(baseSel);
+  modalBody.appendChild(baseWrap);
+
+  // 볼륨
+  const volWrap = document.createElement("label");
+  volWrap.className = "synth-field";
+  volWrap.innerHTML = `<div class="synth-label">볼륨</div>`;
+  const volCtl = document.createElement("div"); volCtl.className = "synth-slider";
+  const vol = document.createElement("input");
+  vol.type = "range"; vol.min = -30; vol.max = 6; vol.step = 1; vol.value = sound.volume ?? -6;
+  const volVal = document.createElement("span"); volVal.className = "synth-val"; volVal.textContent = (sound.volume ?? -6) + "dB";
+  vol.addEventListener("input", () => { sound.volume = Number(vol.value); volVal.textContent = sound.volume + "dB"; rebuildTracksUsing(sound); markDirty(); });
+  volCtl.appendChild(vol); volCtl.appendChild(volVal);
+  volWrap.appendChild(volCtl);
+  modalBody.appendChild(volWrap);
+
+  // 버튼: 미리듣기 · 다른 파일로 교체
+  const btnRow = document.createElement("div");
+  btnRow.className = "share-row";
+  const prev = document.createElement("button");
+  prev.textContent = "▶ 미리듣기";
+  prev.addEventListener("click", () => playSamplePreview(sound));
+  const replace = document.createElement("button");
+  replace.textContent = "다른 파일로 교체";
+  const fin = document.createElement("input");
+  fin.type = "file"; fin.accept = "audio/*"; fin.style.display = "none";
+  fin.addEventListener("change", (e) => {
+    const f = e.target.files && e.target.files[0]; e.target.value = "";
+    if (!f) return;
+    if (f.size > 1.5 * 1024 * 1024) { showToast("오디오 파일이 너무 큽니다 (1.5MB 이하)"); return; }
+    const rd = new FileReader();
+    rd.onload = () => { sound.audio = rd.result; delete sampleBuffers[sound.id]; loadSampleBuffer(sound); rebuildTracksUsing(sound); markDirty(); showToast("오디오 교체됨"); };
+    rd.readAsDataURL(f);
+  });
+  replace.addEventListener("click", () => fin.click());
+  btnRow.appendChild(prev); btnRow.appendChild(replace); btnRow.appendChild(fin);
+  modalBody.appendChild(btnRow);
+
+  const note = document.createElement("p");
+  note.className = "share-note";
+  note.textContent = "⚠ 오디오 파일은 용량이 커서 공유 링크에는 담기지 않습니다(공유하면 이 소리는 신스 소리로 대체됩니다). 이 브라우저에는 저장됩니다.";
+  modalBody.appendChild(note);
+
+  modal.hidden = false;
+}
+
+async function playSamplePreview(sound) {
+  await Tone.start();
+  const buf = sampleBuffers[sound.id];
+  if (!buf || !buf.loaded) { showToast("샘플을 불러오는 중입니다…"); return; }
+  const sampler = new Tone.Sampler({ urls: { [sound.baseNote || "C4"]: buf } }).connect(realtimeMaster());
+  sampler.volume.value = sound.volume ?? -6;
+  sampler.triggerAttackRelease(["C4", "E4", "G4"], 0.8);
+  setTimeout(() => sampler.dispose(), 2200);
 }
 
 async function copyText(text, inputEl) {
