@@ -26,12 +26,31 @@ body {
   padding: 0 20px 24px;
 }
 
-/* ── 상단바 ─────────────────────────────── */
+/* ── 상단바 (항상 위에 고정) ─────────────── */
 .topbar {
+  position: sticky;
+  top: 0;
+  z-index: 15;                 /* 트랙 위, 드로어/스크림(20,30) 아래 */
   display: flex;
   align-items: center;
-  gap: 14px;
-  padding: 16px 0;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  padding: 12px 20px;
+  margin: 0 -20px;             /* body의 좌우 여백을 상쇄해 배경이 화면 끝까지 */
+  background: var(--bg);
+  border-bottom: 1px solid var(--line);
+}
+.transport {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;           /* 오른쪽으로 밀기 */
+}
+#syncScroll.active {
+  background: var(--accent);
+  color: #0b1020;
+  border-color: var(--accent);
+  font-weight: 600;
 }
 .brand h1 { margin: 0; font-size: 20px; }
 .brand .sub { margin: 2px 0 0; color: var(--muted); font-size: 13px; }
@@ -204,13 +223,14 @@ button:hover { border-color: var(--accent); }
 button.primary { background: var(--accent); color: #0b1020; font-weight: 600; border-color: var(--accent); }
 
 /* ── 트랙 ───────────────────────────────── */
-.tracks { display: flex; flex-direction: column; gap: 14px; }
+.tracks { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
 
 .track {
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 10px;
   padding: 10px 12px;
+  min-width: 0;   /* flex 항목이 내용(격자) 크기만큼 커지지 않게 → hscroll이 실제로 넘쳐 스크롤됨 */
 }
 .track.muted { opacity: .5; }
 .track-head {

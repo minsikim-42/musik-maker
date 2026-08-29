@@ -328,7 +328,7 @@ function renderTrack(track) {
   wrap.appendChild(head);
 
   const grid = document.createElement("div");
-  grid.className = "grid" + (track.type === "melody" ? " in-scroller" : "");
+  grid.className = "grid in-scroller"; // 스크롤은 바깥 hscroll/vscroll이 맡는다
   grid.style.gridTemplateColumns = `auto repeat(${steps}, 1fr)`;
 
   track.cellEls = [];
@@ -358,18 +358,23 @@ function renderTrack(track) {
     }
   });
 
+  // 가로 스크롤은 모든 트랙 공통(hscroll). 멜로디는 세로 스크롤(vscroll)을 추가로 감싼다.
+  const hscroll = document.createElement("div");
+  hscroll.className = "hscroll";
+  hscroll.appendChild(grid);
+  track._hscroll = hscroll;
+  hscroll.addEventListener("scroll", () => {
+    track._scrollLeft = hscroll.scrollLeft;
+    syncTracksHorizontally(hscroll); // '트랙 고정'이 켜져 있으면 나머지 트랙도 맞춘다
+  });
+
   if (track.type === "melody") {
-    // 세로(vscroll) · 가로(hscroll)를 분리 — 모바일 축 고정 충돌 방지
-    const hscroll = document.createElement("div");
-    hscroll.className = "hscroll";
-    hscroll.appendChild(grid);
+    // 세로·가로 분리 — 모바일 축 고정 충돌 방지
     const vscroll = document.createElement("div");
     vscroll.className = "vscroll";
     vscroll.appendChild(hscroll);
-
-    enableDragScroll(vscroll, grid);   // 마우스 세로 드래그(그리고 grid._dragged로 클릭 취소)
+    enableDragScroll(vscroll, grid);   // 마우스 세로 드래그(grid._dragged로 클릭 취소)
     vscroll.addEventListener("scroll", () => { track._scrollTop = vscroll.scrollTop; });
-    hscroll.addEventListener("scroll", () => { track._scrollLeft = hscroll.scrollLeft; });
 
     const rowH = 26; // 셀 24 + 간격 2
     const initTop = track._scrollTop != null ? track._scrollTop : Math.max(0, MELODY_NOTES.indexOf(DEFAULT_TOP_NOTE) * rowH);
@@ -377,10 +382,10 @@ function renderTrack(track) {
       vscroll.scrollTop = initTop;
       if (track._scrollLeft != null) hscroll.scrollLeft = track._scrollLeft;
     });
-
     wrap.appendChild(vscroll);
   } else {
-    wrap.appendChild(grid);
+    if (track._scrollLeft != null) requestAnimationFrame(() => { hscroll.scrollLeft = track._scrollLeft; });
+    wrap.appendChild(hscroll);
   }
   return wrap;
 }
@@ -703,6 +708,29 @@ barsSel.addEventListener("change", (e) => { bars = Number(e.target.value); resiz
 // 트랙 추가: 일단 만들고, 사운드(악기·드럼)는 트랙에서 고른다
 document.getElementById("addTrack").addEventListener("click", () => addTrack("melody"));
 document.getElementById("newSong").addEventListener("click", () => newSong(true));
+
+// ── 트랙 고정(모든 트랙 가로 이동을 함께) ──────────────────────
+let syncScroll = lsGet("music-maker.syncScroll") === "1";
+let syncingScroll = false;
+function syncTracksHorizontally(sourceHscroll) {
+  if (!syncScroll || syncingScroll) return;
+  syncingScroll = true;
+  const x = sourceHscroll.scrollLeft;
+  for (const t of tracks) if (t._hscroll && t._hscroll !== sourceHscroll) t._hscroll.scrollLeft = x;
+  syncingScroll = false;
+}
+const syncBtn = document.getElementById("syncScroll");
+function updateSyncBtn() { syncBtn.classList.toggle("active", syncScroll); }
+syncBtn.addEventListener("click", () => {
+  syncScroll = !syncScroll;
+  updateSyncBtn();
+  lsSet("music-maker.syncScroll", syncScroll ? "1" : "0");
+  if (syncScroll) { // 켜는 순간 모든 트랙을 첫 트랙 위치로 맞춘다
+    const first = tracks.find((t) => t._hscroll);
+    if (first) syncTracksHorizontally(first._hscroll);
+  }
+});
+updateSyncBtn();
 
 // ══════════════════════════════════════════════════════════════
 //  왼쪽 드로어 + 앞으로 추가할 기능

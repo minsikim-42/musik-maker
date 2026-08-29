@@ -70,7 +70,7 @@ localStorage 상태나 공유 코덱 round-trip은 `javascript_tool`로 `localSt
 | 화면 그리기 | `render` `renderTrack` | 트랙들을 DOM으로 그림(격자 셀·헤더 컨트롤). 구조 변경 때 전체 재그림 |
 | 재생 | `rebuildSequence` `highlightColumn` `clearHighlight` | `Tone.Transport`+`Tone.Sequence`로 스텝을 돌며 모든 트랙을 함께 울림, 재생 위치 표시 |
 | 세션 저장소 | `serialize` `deserialize` `newSong` `openSession` `saveActive` `markDirty` `flushSave` `deleteSession` `renameSession` `renderSessionList` | 곡=세션을 localStorage에 자동 저장, 왼쪽 목록에서 전환 |
-| 컨트롤 배선 | (익명) | 재생/정지/템포/곡길이/트랙추가/공유 버튼 이벤트 |
+| 컨트롤 배선 | (익명) `syncTracksHorizontally` | 재생/정지/템포/곡길이/트랙추가/공유/🔒트랙고정 버튼 이벤트. 재생·정지·트랙고정은 sticky 상단바(`.topbar`)에, 트랙 고정은 모든 트랙 `_hscroll`을 함께 스크롤 |
 | 드로어 + 메뉴 | `MENU` `openSynthFromMenu` `openDrawer` `showToast` | 왼쪽 "내 곡" 목록 + "앞으로 추가할 기능"(잠금/사용가능) |
 | 링크 공유 | `encodeShare` `decodeShare` `openShareModal` `openSynthModal` `importFromHash` | 곡을 URL에 담고/풀고, 공유·음색 편집 모달 |
 | 시작 | (하단) | localStorage 로드 → 해시 임포트 or 지난 곡 or 새 곡 |
@@ -163,6 +163,13 @@ migration을 챙길 것**: 예전 저장은 멜로디 13줄(`LEGACY_MELODY_NOTES
   안 써져 있을 수 있다**(테스트할 때 디바운스만큼 기다릴 것 — 실제로 "직전 상태를 읽는" 착오를 겪었다).
 - **첫 로드 때 빈 편집기를 저장해 곡을 덮지 않도록** `hasLoaded` 가드가 있다. `openSession`은
   `hasLoaded`일 때만 `flushSave`(나가는 곡 저장)를 부른다. 이 가드를 지우면 시작 시 활성 곡이 빈 곡으로 지워진다.
+- **격자 가로 스크롤이 안 되면 `min-width:0`을 의심하라.** `.track`은 `.tracks`(flex column)의 항목이라
+  `min-width:auto`(=min-content)로 격자 크기만큼 커져 `hscroll`이 넘치지 않는다 → 가로 스크롤이 안 생긴다.
+  `.track`(그리고 `.tracks`)에 `min-width:0`을 줘야 컨테이너 폭에 맞춰 줄고 `hscroll`이 실제로 스크롤한다.
+- **모바일에서 가로가 안 움직이면 `touch-action`을 의심하라.** 한 요소가 두 축을 다 스크롤하면 모바일이
+  첫 방향으로 축을 고정한다. 세로(`vscroll` `pan-y`)·가로(`hscroll` `pan-x`)를 중첩 분리해 각 축을 따로 맡긴다.
+- **정적 배포라 캐시가 옛 버전을 붙든다.** `index.html`의 `app.js?v=N`·`style.css?v=N`을 **바꿀 때마다 N을 올린다**
+  (안 올리면 브라우저·GitHub Pages가 옛 파일을 준다 — 사용자가 새로고침해야 겨우 반영되던 문제).
 - **`[hidden]`이 `display:flex`를 이기게** `style.css` 맨 위에 `[hidden]{display:none !important}`가 있다.
   `.modal`·`.toast`에 `display:flex`를 줬는데 이게 UA의 `[hidden]{display:none}`을 이겨서
   **팝업이 항상 보이던 버그**를 막는다. 새로 `display`를 준 요소를 `hidden`으로 토글한다면 이 규칙에 기댄다.
