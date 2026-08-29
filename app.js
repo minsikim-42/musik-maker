@@ -133,7 +133,7 @@ function makeTrackObj(type, data) {
     id: ++trackSeq,
     type,
     instrument: data?.instrument ?? (type === "drums" ? null : "piano"),
-    name: data?.name ?? (type === "drums" ? "드럼" : "멜로디 " + trackSeq),
+    name: data?.name ?? ("트랙 " + trackSeq),
     muted: data?.muted ?? false,
     // 커스텀 음색 파라미터(악기가 custom일 때만 의미. 저장된 값이 있으면 채운다)
     params: data?.params ? { ...defaultParams(), ...data.params } : null,
@@ -205,33 +205,42 @@ function renderTrack(track) {
 
   const head = document.createElement("div");
   head.className = "track-head";
-  head.innerHTML = `<span class="kind">${track.type === "drums" ? "드럼" : "멜로디"}</span>
-    <span class="name">${track.name}</span><span class="spacer"></span>`;
+  head.innerHTML = `<span class="name">${track.name}</span><span class="spacer"></span>`;
 
-  if (track.type === "melody") {
-    const sel = document.createElement("select");
-    for (const [val, lbl] of [["piano", "피아노"], ["synth", "신스"], ["pluck", "플럭"], ["bass", "베이스"], ["custom", "커스텀 🎹"]]) {
-      const o = document.createElement("option");
-      o.value = val; o.textContent = lbl;
-      if (track.instrument === val) o.selected = true;
-      sel.appendChild(o);
+  // 사운드(악기) 선택 — 모든 트랙 공통. '드럼'도 하나의 사운드다.
+  // 드럼↔멜로디는 격자 줄 구성이 달라서 바꾸면 그 트랙의 격자는 새로 시작된다.
+  const sel = document.createElement("select");
+  const SOUNDS = [["piano", "피아노"], ["synth", "신스"], ["pluck", "플럭"], ["bass", "베이스"], ["custom", "커스텀 🎹"], ["drums", "드럼"]];
+  const curVal = track.type === "drums" ? "drums" : track.instrument;
+  for (const [val, lbl] of SOUNDS) {
+    const o = document.createElement("option");
+    o.value = val; o.textContent = lbl;
+    if (val === curVal) o.selected = true;
+    sel.appendChild(o);
+  }
+  sel.addEventListener("change", () => {
+    const v = sel.value;
+    const newType = v === "drums" ? "drums" : "melody";
+    if (newType !== track.type) {
+      // 줄 의미가 달라지므로 격자를 새로 시작(빈 격자)
+      track.type = newType;
+      const nrows = newType === "drums" ? DRUM_ROWS : MELODY_NOTES;
+      track.grid = nrows.map(() => new Array(steps).fill(false));
     }
-    sel.addEventListener("change", () => {
-      track.instrument = sel.value;
-      if (track.instrument === "custom" && !track.params) track.params = defaultParams();
-      track.synth = buildSynth(track);
-      render();       // '음색' 버튼 노출/숨김 갱신
-      markDirty();
-    });
-    head.appendChild(sel);
+    track.instrument = newType === "drums" ? null : v;
+    if (track.instrument === "custom" && !track.params) track.params = defaultParams();
+    track.synth = buildSynth(track);
+    render();       // 격자·'음색' 버튼 갱신
+    markDirty();
+  });
+  head.appendChild(sel);
 
-    // 커스텀일 때만 음색 편집 버튼
-    if (track.instrument === "custom") {
-      const toneBtn = document.createElement("button");
-      toneBtn.textContent = "🎹 음색";
-      toneBtn.addEventListener("click", () => openSynthModal(track));
-      head.appendChild(toneBtn);
-    }
+  // 커스텀 음색일 때만 음색 편집 버튼
+  if (track.type === "melody" && track.instrument === "custom") {
+    const toneBtn = document.createElement("button");
+    toneBtn.textContent = "🎹 음색";
+    toneBtn.addEventListener("click", () => openSynthModal(track));
+    head.appendChild(toneBtn);
   }
 
   const muteBtn = document.createElement("button");
@@ -374,14 +383,13 @@ function deserialize(data) {
   loading = false;
 }
 
-// 새 빈 곡의 기본 구성: 멜로디 1 + 드럼 1
+// 새 빈 곡의 기본 구성: 트랙 하나(피아노). 사운드는 트랙에서 바꾼다.
 function freshSongData() {
   return {
     bpm: 120,
     bars: 2,
     tracks: [
-      { type: "melody", instrument: "piano", name: "멜로디 1", muted: false, grid: null },
-      { type: "drums", instrument: null, name: "드럼", muted: false, grid: null },
+      { type: "melody", instrument: "piano", name: "트랙 1", muted: false, grid: null },
     ],
   };
 }
@@ -565,8 +573,8 @@ bpm.addEventListener("input", () => {
   markDirty();
 });
 barsSel.addEventListener("change", (e) => { bars = Number(e.target.value); resizeAll(); });
-document.getElementById("addMelody").addEventListener("click", () => addTrack("melody"));
-document.getElementById("addDrums").addEventListener("click", () => addTrack("drums"));
+// 트랙 추가: 일단 만들고, 사운드(악기·드럼)는 트랙에서 고른다
+document.getElementById("addTrack").addEventListener("click", () => addTrack("melody"));
 document.getElementById("newSong").addEventListener("click", () => newSong(true));
 
 // ══════════════════════════════════════════════════════════════

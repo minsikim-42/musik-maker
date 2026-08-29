@@ -40,9 +40,9 @@ python3 -m http.server 8000
 ```bash
 git add -A && git commit -m "..." && git push
 ```
-- 계정 인증은 `gh`(GitHub CLI, brew 설치)로 로그인돼 있음(HTTPS, keyring). 커밋 author는 `minsikim-42` / `spalstlr321@gmail.com`.
-- Pages 상태 확인: `gh api repos/minsikim-42/music-maker/pages/builds/latest --jq '.status'` (`built`면 완료).
-- Pages가 꺼져 있으면: `gh api -X POST repos/minsikim-42/music-maker/pages -f "source[branch]=main" -f "source[path]=/"`.
+- 계정 인증은 `gh`(GitHub CLI)로 로그인돼 있어야 한다(`gh auth status`로 확인).
+- Pages 상태 확인: `gh api repos/<owner>/music-maker/pages/builds/latest --jq '.status'` (`built`면 완료).
+- Pages가 꺼져 있으면: `gh api -X POST repos/<owner>/music-maker/pages -f "source[branch]=main" -f "source[path]=/"`.
 
 ### 검증 방법 (이 프로젝트의 원칙)
 자동 테스트는 없다. **브라우저에서 직접 확인한다.** 에이전트라면 in-app 브라우저로:
@@ -63,7 +63,7 @@ localStorage 상태나 공유 코덱 round-trip은 `javascript_tool`로 `localSt
 | 섹션 | 핵심 함수 | 하는 일 |
 |---|---|---|
 | 악기(신스) | `buildSynth` `defaultParams` `applyParamsLive` `disposeSynth` `triggerTrack` `preview` | 트랙 종류/악기에 맞는 Tone 신스 생성·해제, 한 스텝 울리기 |
-| 트랙 | `makeTrackObj` `addTrack` `removeTrack` `resizeAll` `clearTracks` | 트랙 객체 생성/추가/삭제, 곡 길이 변경 시 격자 리사이즈 |
+| 트랙 | `makeTrackObj` `addTrack` `removeTrack` `resizeAll` `clearTracks` | 트랙 객체 생성/추가/삭제, 곡 길이 변경 시 격자 리사이즈. **트랙은 "＋ 트랙 추가"로 하나 만들고, 사운드(악기·드럼)는 트랙 헤더의 드롭다운에서 고른다** |
 | 화면 그리기 | `render` `renderTrack` | 트랙들을 DOM으로 그림(격자 셀·헤더 컨트롤). 구조 변경 때 전체 재그림 |
 | 재생 | `rebuildSequence` `highlightColumn` `clearHighlight` | `Tone.Transport`+`Tone.Sequence`로 스텝을 돌며 모든 트랙을 함께 울림, 재생 위치 표시 |
 | 세션 저장소 | `serialize` `deserialize` `newSong` `openSession` `saveActive` `markDirty` `flushSave` `deleteSession` `renameSession` `renderSessionList` | 곡=세션을 localStorage에 자동 저장, 왼쪽 목록에서 전환 |
@@ -92,13 +92,16 @@ localStorage 상태나 공유 코덱 round-trip은 `javascript_tool`로 `localSt
 ### 트랙
 ```js
 trackData = {
-  type: "melody" | "drums",
+  type: "melody" | "drums",  // 사운드로부터 파생: "드럼"이면 drums, 나머지는 melody
   instrument: "piano"|"synth"|"pluck"|"bass"|"custom" | null(드럼),
   name, muted,
   params: {…} | null,        // instrument==="custom"일 때만. 커스텀 음색
   grid: boolean[rows][steps], // rows: 멜로디=13(반음), 드럼=3(하이햇/스네어/킥). steps = bars*16
 }
 ```
+**사운드는 트랙마다 드롭다운 하나로 고른다**(피아노/신스/플럭/베이스/커스텀/드럼). 사운드를 바꾸면
+`track.instrument`가 바뀌고, **드럼↔멜로디처럼 줄 구성이 달라지는 전환은 그 트랙의 격자를 새로 시작한다**
+(줄 의미가 달라 매핑이 불가능). 같은 멜로디 계열 안에서 악기만 바꾸면 격자는 유지된다.
 런타임 트랙 객체엔 추가로 `id`, `synth`(Tone 인스턴스), `cellEls`(DOM 참조)가 붙지만
 **직렬화에는 넣지 않는다**(`serialize`가 골라 담는다).
 
