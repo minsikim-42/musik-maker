@@ -163,6 +163,9 @@ migration을 챙길 것**: 예전 저장은 멜로디 13줄(`LEGACY_MELODY_NOTES
   안 써져 있을 수 있다**(테스트할 때 디바운스만큼 기다릴 것 — 실제로 "직전 상태를 읽는" 착오를 겪었다).
 - **첫 로드 때 빈 편집기를 저장해 곡을 덮지 않도록** `hasLoaded` 가드가 있다. `openSession`은
   `hasLoaded`일 때만 `flushSave`(나가는 곡 저장)를 부른다. 이 가드를 지우면 시작 시 활성 곡이 빈 곡으로 지워진다.
+- **`PolySynth`에는 Monophonic 계열만 넣는다(Tone 14.8).** `Synth`/`MonoSynth`/`FMSynth`/`AMSynth`는 되지만
+  `PluckSynth`·`NoiseSynth`는 안 된다 → 넣으면 재생 시 "Voice must extend Monophonic" 에러. 그래서 모든 멜로디
+  악기는 `PolySynth(Tone.Synth)` + 파형/엔벨로프로 음색을 낸다(드럼의 NoiseSynth는 PolySynth 없이 직접 씀).
 - **격자 가로 스크롤이 안 되면 `min-width:0`을 의심하라.** `.track`은 `.tracks`(flex column)의 항목이라
   `min-width:auto`(=min-content)로 격자 크기만큼 커져 `hscroll`이 넘치지 않는다 → 가로 스크롤이 안 생긴다.
   `.track`(그리고 `.tracks`)에 `min-width:0`을 줘야 컨테이너 폭에 맞춰 줄고 `hscroll`이 실제로 스크롤한다.

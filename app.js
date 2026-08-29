@@ -98,13 +98,30 @@ function createVoices(track, out) {
     return { kind: "melody", poly, filt };
   }
 
+  // 모든 악기는 PolySynth(Tone.Synth) 기반(화음 가능). PluckSynth/NoiseSynth는 Monophonic이 아니라
+  // PolySynth에 못 넣는다(Tone 14.8) — 그래서 플럭도 Synth 엔벨로프로 '뜯는 느낌'을 흉내낸다.
   let poly;
   if (track.instrument === "pluck") {
-    poly = new Tone.PolySynth(Tone.PluckSynth);
+    poly = new Tone.PolySynth(Tone.Synth, {
+      oscillator: { type: "triangle" },
+      envelope: { attack: 0.002, decay: 0.2, sustain: 0, release: 0.15 },
+    });
+  } else if (track.instrument === "guitar") {
+    // 기타: 톱니로 밝게, 빠른 어택 + 감쇠로 뜯는 줄 느낌
+    poly = new Tone.PolySynth(Tone.Synth, {
+      oscillator: { type: "sawtooth" },
+      envelope: { attack: 0.005, decay: 0.5, sustain: 0.08, release: 0.4 },
+    });
   } else if (track.instrument === "bass") {
     poly = new Tone.PolySynth(Tone.Synth, {
       oscillator: { type: "square" },
       envelope: { attack: 0.01, decay: 0.2, sustain: 0.4, release: 0.4 },
+    });
+  } else if (track.instrument === "wind") {
+    // 관악기: 부드러운 어택 + 긴 지속(플루트풍 입김 소리)
+    poly = new Tone.PolySynth(Tone.Synth, {
+      oscillator: { type: "sine" },
+      envelope: { attack: 0.09, decay: 0.1, sustain: 0.9, release: 0.4 },
     });
   } else if (track.instrument === "synth") {
     poly = new Tone.PolySynth(Tone.Synth);
@@ -115,7 +132,7 @@ function createVoices(track, out) {
     });
   }
   poly.connect(out);
-  poly.volume.value = -6;
+  poly.volume.value = track.instrument === "wind" ? -4 : -6; // 사인은 살짝 작게 들려 보정
   return { kind: "melody", poly };
 }
 
@@ -285,7 +302,7 @@ function renderTrack(track) {
     if (val === curVal) o.selected = true;
     sel.appendChild(o);
   };
-  for (const [val, lbl] of [["piano", "피아노"], ["synth", "신스"], ["pluck", "플럭"], ["bass", "베이스"]]) addOpt(val, lbl);
+  for (const [val, lbl] of [["piano", "피아노"], ["synth", "신스"], ["pluck", "플럭"], ["bass", "베이스"], ["guitar", "기타"], ["wind", "관악기"]]) addOpt(val, lbl);
   for (const snd of soundLib) addOpt("snd:" + snd.id, "🎹 " + snd.name);
   addOpt("__manage", "🎹 소리 만들기·편집…");
   addOpt("drums", "드럼");
@@ -808,7 +825,7 @@ function showToast(msg, actionLabel, onAction) {
 // 격자가 불리언이라 그대로 JSON에 담으면 링크가 너무 길어진다.
 // → 비트로 패킹해 base64로 만들어 링크를 짧게 유지한다.
 const INSTR_LIST = ["piano", "synth", "pluck", "bass", "custom"]; // v1/v2 레거시 디코드용
-const BUILTIN = ["piano", "synth", "pluck", "bass"];              // v3 기본 악기(0..3)
+const BUILTIN = ["piano", "synth", "pluck", "bass", "guitar", "wind"]; // v3+ 기본 악기(0..)
 const WAVE_LIST = ["sine", "triangle", "square", "sawtooth"];
 // 커스텀 음색 파라미터를 바이트로 양자화(공유 링크에 싣기 위해). [min,max]
 const PARAM_RANGES = { attack: [0, 2], decay: [0, 2], sustain: [0, 1], release: [0, 3], cutoff: [200, 8000], volume: [-30, 0] };
