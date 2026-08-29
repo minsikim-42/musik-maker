@@ -3,10 +3,21 @@
 // 목록에서 곡을 누르면 그 곡이 열리고, 편집하면 활성 곡에 자동 저장된다.
 
 // ── 음/드럼 줄 정의 ─────────────────────────────────────────────
-const MELODY_NOTES = [
-  "C5", "B4", "A#4", "A4", "G#4", "G4", "F#4",
-  "F4", "E4", "D#4", "D4", "C#4", "C4",
-];
+// 멜로디 음역: C6(맨 위) ~ C3(맨 아래). 격자는 이 중 일부만 보여주고 세로 스크롤한다.
+function buildMelodyNotes(lowOct, highOct) {
+  const names = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+  const asc = [];
+  for (let o = lowOct; o <= highOct; o++) {
+    for (const n of names) { asc.push(n + o); if (n === "C" && o === highOct) break; } // highOct는 C까지만
+    if (o === highOct) break;
+  }
+  return asc.reverse(); // 위(높은 음)부터
+}
+const MELODY_NOTES = buildMelodyNotes(3, 6); // C6..C3 (37음)
+// 예전 저장(13줄, C5..C4)을 새 음역으로 옮길 때 쓰는 기준
+const LEGACY_MELODY_NOTES = ["C5", "B4", "A#4", "A4", "G#4", "G4", "F#4", "F4", "E4", "D#4", "D4", "C#4", "C4"];
+const DEFAULT_TOP_NOTE = "C5"; // 기본으로 보이는 맨 윗줄(예전 화면과 같은 위치)
+
 const DRUM_ROWS = ["하이햇", "스네어", "킥"];
 const isSharp = (n) => n.includes("#");
 
@@ -193,13 +204,19 @@ function makeTrackObj(type, data) {
     synth: null,
     cellEls: null,
   };
-  // 격자: 저장된 값이 있으면 현재 steps에 맞춰 정규화, 없으면 빈 격자
-  track.grid = rows.map((_, r) => {
-    const row = new Array(steps).fill(false);
-    const saved = data?.grid?.[r];
-    if (saved) for (let c = 0; c < steps && c < saved.length; c++) row[c] = !!saved[c];
-    return row;
-  });
+  // 격자: 빈 격자를 만들고, 저장값이 있으면 채운다.
+  track.grid = rows.map(() => new Array(steps).fill(false));
+  const src = data?.grid;
+  if (src) {
+    // 예전 저장은 멜로디가 13줄(C5..C4)이었다. 줄 수가 다르면 음이름으로 새 음역에 맞춰 옮긴다.
+    const legacy = type === "melody" && src.length === LEGACY_MELODY_NOTES.length && rows.length !== src.length;
+    for (let sr = 0; sr < src.length; sr++) {
+      const tr = legacy ? rows.indexOf(LEGACY_MELODY_NOTES[sr]) : sr;
+      if (tr < 0 || tr >= rows.length) continue;
+      const savedRow = src[sr] || [];
+      for (let c = 0; c < steps && c < savedRow.length; c++) track.grid[tr][c] = !!savedRow[c];
+    }
+  }
   track.synth = buildSynth(track);
   return track;
 }
@@ -311,7 +328,7 @@ function renderTrack(track) {
   wrap.appendChild(head);
 
   const grid = document.createElement("div");
-  grid.className = "grid";
+  grid.className = "grid" + (track.type === "melody" ? " scrolly" : ""); // 멜로디는 세로 스크롤
   grid.style.gridTemplateColumns = `auto repeat(${steps}, 1fr)`;
 
   track.cellEls = [];
@@ -330,6 +347,7 @@ function renderTrack(track) {
       if (c % 4 === 0) cell.classList.add("beat");
       if (track.grid[r][c]) cell.classList.add("on");
       cell.addEventListener("click", () => {
+        if (grid._dragged) return; // 방금 드래그로 스크롤했으면 클릭(음 찍기) 취소
         track.grid[r][c] = !track.grid[r][c];
         cell.classList.toggle("on", track.grid[r][c]);
         if (track.grid[r][c]) preview(track, r);
@@ -340,8 +358,44 @@ function renderTrack(track) {
     }
   });
 
+  if (track.type === "melody") {
+    enableDragScroll(grid);
+    // 스크롤 위치 유지(전에 본 위치가 있으면 그대로, 없으면 기본 음역으로)
+    grid.addEventListener("scroll", () => { track._scrollTop = grid.scrollTop; });
+    const rowH = 26; // 셀 24 + 간격 2
+    const initTop = track._scrollTop != null ? track._scrollTop : Math.max(0, MELODY_NOTES.indexOf(DEFAULT_TOP_NOTE) * rowH);
+    requestAnimationFrame(() => { grid.scrollTop = initTop; });
+  }
+
   wrap.appendChild(grid);
   return wrap;
+}
+
+// 마우스로 격자를 끌면 세로 스크롤(음역 이동). 터치는 브라우저 기본 스크롤에 맡긴다.
+// 이동 문턱(6px)을 넘으면 드래그로 보고 셀 클릭(음 찍기)을 취소한다.
+function enableDragScroll(grid) {
+  let st = null;
+  grid.addEventListener("pointerdown", (e) => {
+    if (e.pointerType !== "mouse" || e.button !== 0) return; // 터치/펜은 기본 스크롤
+    st = { y: e.clientY, top: grid.scrollTop, moved: false };
+    grid._dragged = false;
+  });
+  grid.addEventListener("pointermove", (e) => {
+    if (!st) return;
+    const dy = e.clientY - st.y;
+    if (!st.moved && Math.abs(dy) < 6) return;
+    st.moved = true;
+    grid._dragged = true;
+    grid.scrollTop = st.top - dy;
+    try { grid.setPointerCapture(e.pointerId); } catch {}
+    e.preventDefault();
+  });
+  const end = () => {
+    if (st && st.moved) setTimeout(() => { grid._dragged = false; }, 0); // 클릭 취소 후 해제
+    st = null;
+  };
+  grid.addEventListener("pointerup", end);
+  grid.addEventListener("pointercancel", end);
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -746,10 +800,11 @@ function pushSoundParams(bytes, s) {
   bytes.push(q8(s.volume, PARAM_RANGES.volume));
 }
 
-// 버전 3: 소리 라이브러리 + 트랙의 소리 참조. (v1/v2 링크도 decodeShare가 계속 연다)
+// 버전 4: 멜로디 음역 확장(C3~C6, 37줄). 소리 라이브러리 + 트랙의 소리 참조.
+// (v1~v3 링크도 decodeShare가 계속 연다 — 그때 멜로디는 13줄이었다)
 function encodeShare(name, data) {
   const bytes = [];
-  bytes.push(3);
+  bytes.push(4);
   pushName(bytes, name);
   bytes.push(Math.max(0, Math.min(255, data.bpm || 120)));
   bytes.push(data.bars);
@@ -798,11 +853,13 @@ function decodeShare(code) {
   });
 
   const ver = b[i++];
-  if (![1, 2, 3].includes(ver)) throw new Error("알 수 없는 공유 버전");
+  if (![1, 2, 3, 4].includes(ver)) throw new Error("알 수 없는 공유 버전");
   const name = readName();
   const bpm = b[i++];
   const bars = b[i++];
   const steps = bars * STEPS_PER_BAR;
+  // 멜로디 줄 수: v4부터 음역이 넓어졌다(37줄). 그 전 링크는 13줄로 읽고 makeTrackObj가 음이름으로 옮긴다.
+  const melodyRows = ver >= 4 ? MELODY_NOTES.length : LEGACY_MELODY_NOTES.length;
 
   // 소리 라이브러리(v3부터)
   const sounds = [];
@@ -837,7 +894,7 @@ function decodeShare(code) {
       else { type = "melody"; instrument = BUILTIN[ib] || "piano"; }
       const muted = b[i++] === 1;
       const tname = readName();
-      const grid = readGrid(type === "drums" ? DRUM_ROWS.length : MELODY_NOTES.length);
+      const grid = readGrid(type === "drums" ? DRUM_ROWS.length : melodyRows);
       tracks.push({ type, instrument, name: tname, muted, grid });
     } else {
       // v1/v2 레거시: [type][instr][muted][name] (v2 custom이면 음색 7B) [grid]
@@ -847,7 +904,7 @@ function decodeShare(code) {
       const tname = readName();
       let params = null;
       if (ver >= 2 && type === "melody" && INSTR_LIST[instr] === "custom") params = readParams();
-      const grid = readGrid(type === "drums" ? DRUM_ROWS.length : MELODY_NOTES.length);
+      const grid = readGrid(type === "drums" ? DRUM_ROWS.length : melodyRows);
       // 레거시 custom → makeTrackObj가 소리로 마이그레이션(instrument "custom"+params 유지)
       const instrument = type === "drums" ? null : (INSTR_LIST[instr] || "piano");
       tracks.push({ type, instrument, name: tname, muted, params, grid });
@@ -1215,7 +1272,7 @@ function soundLabel(track) {
 
 // 곡 전체를 하나의 SVG로(멜로디 트랙을 위아래로 쌓음). 흰 바탕·검은 음표(인쇄용).
 function buildScoreSVG() {
-  const gap = 12, clefW = 46, stepW = 18, blockH = 138;
+  const gap = 12, clefW = 46, stepW = 18, blockH = 214; // 넓어진 음역(C3~C6)을 담도록 키움
   const width = clefW + steps * stepW + 24;
   const melodyTracks = tracks.filter((t) => t.type !== "drums");
   const height = Math.max(1, melodyTracks.length) * blockH + 12;
@@ -1224,8 +1281,8 @@ function buildScoreSVG() {
 
   melodyTracks.forEach((track, ti) => {
     const top = 12 + ti * blockH;
-    const staffTop = top + 30;                 // 맨 위 줄(F5)
-    const midY = staffTop + 2 * gap;            // 가운데 줄(B4)
+    const midY = top + 110;                     // 가운데 줄(B4) — 위아래 여유
+    const staffTop = midY - 2 * gap;            // 맨 위 줄(F5)
     const yFor = (s) => midY - s * (gap / 2);
     const lineYs = [4, 2, 0, -2, -4].map(yFor);
     const yTop = yFor(4), yBot = yFor(-4);

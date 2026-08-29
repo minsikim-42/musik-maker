@@ -108,9 +108,14 @@ trackData = {
   type: "melody" | "drums",  // instrument로부터 파생: 드럼이면 drums, 나머지는 melody
   instrument: "piano"|"synth"|"pluck"|"bass" | "snd:<id>"(커스텀 소리) | null(드럼),
   name, muted,
-  grid: boolean[rows][steps], // rows: 멜로디=13(반음), 드럼=3(하이햇/스네어/킥). steps = bars*16
+  grid: boolean[rows][steps], // rows: 멜로디=37(C6~C3 반음), 드럼=3(하이햇/스네어/킥). steps = bars*16
 }
 ```
+멜로디 격자는 넓은 음역(C6~C3, `buildMelodyNotes(3,6)`) 중 ~13줄만 보이는 **세로 스크롤 뷰**다
+(`.grid.scrolly` + `enableDragScroll`: 마우스 드래그·휠·터치로 위아래 이동, 드래그는 6px 넘으면 클릭 취소).
+스크롤 위치는 `track._scrollTop`에 기억하고 기본은 `DEFAULT_TOP_NOTE`(C5). **음역/줄 수를 바꾸면
+migration을 챙길 것**: 예전 저장은 멜로디 13줄(`LEGACY_MELODY_NOTES`, C5~C4)이라 `makeTrackObj`가
+줄 수가 다르면 음이름으로 새 음역에 옮기고, `decodeShare`는 v4 미만 링크를 13줄로 읽는다.
 **사운드는 트랙마다 드롭다운 하나로 고른다**: 기본 악기 + 내가 만든 소리들 + `🎹 소리 만들기·편집…` + 드럼.
 사운드를 바꾸면 `track.instrument`가 바뀌고, **드럼↔멜로디처럼 줄 구성이 달라지는 전환은 그 트랙의 격자를 새로
 시작한다**(줄 의미가 달라 매핑 불가). 같은 멜로디 계열 안에서 바꾸면 격자는 유지된다.
@@ -133,13 +138,15 @@ trackData = {
 
 - 서버 없이 곡을 **URL 해시**(`#song=<base64url>`)에 담는다. 격자가 불리언이라 그대로 JSON+base64면
   링크가 길어지므로 **비트로 패킹**한다(2트랙 2마디 ≈ 150자).
-- **버전 3**(현재): `[3][곡이름][bpm][bars] [소리수] 소리마다{ [이름][음색7B] } [트랙수] 트랙마다{ [instr바이트][muted][이름][격자비트] }`.
+- **버전 4**(현재): `[4][곡이름][bpm][bars] [소리수] 소리마다{ [이름][음색7B] } [트랙수] 트랙마다{ [instr바이트][muted][이름][격자비트] }`.
   - 소리 음색 7바이트 = 파형1 + ADSR4 + 컷오프1 + 볼륨1 (`q8`/`dq8`로 양자화).
   - 트랙 `instr바이트`: 0~3 = 기본 악기(`BUILTIN`), 200 = 드럼, 100+idx = `sounds[idx]` 참조.
+  - 멜로디 격자 줄 수: v4 = 37(C6~C3), v1~v3 = 13. `decodeShare`가 버전으로 가른다(`melodyRows`).
   - 양자화로 값이 아주 미세하게 바뀔 수 있으나 귀로는 구분 안 됨.
-- **하위호환**: `decodeShare`가 v1/v2(트랙마다 `[type][instr][muted][이름](+커스텀 음색7B)[격자]`, 소리 섹션 없음)도
-  처리한다. v1/v2의 `custom` 트랙은 `deserialize`→`makeTrackObj`가 소리 라이브러리로 마이그레이션한다.
-  `encodeShare`는 항상 v3로 쓴다. 포맷을 또 바꾸면 **버전 바이트를 올리고 옛 버전 디코드를 남겨 둘 것**.
+- **하위호환**: `decodeShare`가 v1/v2(소리 섹션 없음·트랙마다 `[type][instr][muted][이름](+커스텀 음색7B)[격자]`),
+  v3(소리 섹션 있음·멜로디 13줄)도 처리한다. v1/v2의 `custom` 트랙과 v1~v3의 13줄 멜로디는
+  `deserialize`→`makeTrackObj`가 소리 라이브러리·새 음역으로 마이그레이션한다.
+  `encodeShare`는 항상 v4로 쓴다. 포맷을 또 바꾸면 **버전 바이트를 올리고 옛 버전 디코드를 남겨 둘 것**.
 - 링크로 접속하면 `importFromHash`가 그 곡을 **새 세션으로 담고** 열고, 주소창의 코드는 `history.replaceState`로 정리한다.
 
 ---
