@@ -71,10 +71,15 @@ function softclip(x) {
   const t = 0.7, a = Math.abs(x), s = Math.sign(x);
   return a <= t ? x : s * (t + (1 - t) * Math.tanh((a - t) / (1 - t)));
 }
+// 마스터 체인: [입력 게인(헤드룸)] → [소프트 클리퍼] → 출력.
+// 게인으로 미리 낮춰(headroom) 여러 트랙이 겹쳐도 클리퍼가 상시 세게 물리지 않게 한다
+// → 킥의 순간 피크가 뭉개지며 나던 '퍼벅' 소리를 막는다. 트랙은 이 게인 입력에 붙는다.
 function makeMaster() {
   const ws = new Tone.WaveShaper(softclip, 2048);
-  ws.oversample = "2x"; // 비선형에서 생기는 앨리어싱 완화
-  return ws.toDestination();
+  ws.oversample = "4x"; // 비선형에서 생기는 앨리어싱 완화(2x→4x)
+  ws.toDestination();
+  const trim = new Tone.Gain(0.5).connect(ws); // -6dB 헤드룸
+  return trim;
 }
 
 // 재생용 마스터: 모든 트랙이 이 소프트 클리퍼를 거쳐 출력된다.
@@ -102,7 +107,7 @@ function createVoices(track, out) {
       noise: { type: "white" },
       envelope: { attack: 0.001, decay: 0.03, sustain: 0 },
     }).connect(hatOut);
-    kick.volume.value = -4; snare.volume.value = -10; hat.volume.value = -14;
+    kick.volume.value = -7; snare.volume.value = -11; hat.volume.value = -15; // 킥의 큰 순간 피크를 낮춰 겹칠 때 뭉개짐 방지
     return { kind: "drums", kick, snare, hat, hatOut, vol };
   }
 
