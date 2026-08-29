@@ -34,11 +34,12 @@ python3 -m http.server 8000
 
 ### 기본 악기
 
-- 트랙 사운드 드롭다운의 기본 악기: 피아노 · 신스 · 플럭 · 베이스 · **기타** · **관악기**.
-- 전부 `PolySynth(Tone.Synth)` 기반(화음 가능). 파형·엔벨로프로 음색을 나눈다:
-  기타=톱니+빠른 감쇠, 관악기=사인+부드러운 어택·긴 지속, 플럭=삼각+아주 짧은 감쇠.
+- 트랙 사운드 드롭다운의 기본 악기: 피아노 · 신스 · 플럭 · 베이스 · **기타(통기타)** · **클라리넷**.
+- Synth/FMSynth 기반(둘 다 Monophonic이라 `PolySynth`에 넣어 화음 가능).
+  기타·클라리넷은 **FMSynth**(배음이 풍부): 통기타=빠른 어택+긴 감쇠로 잦아드는 뜯는 줄,
+  클라리넷=홀수 배음의 목관·부드러운 어택·긴 지속. 나머지는 Synth+파형/엔벨로프.
 - **주의(Tone 14.8):** `PluckSynth`/`NoiseSynth`는 Monophonic이 아니라 `PolySynth`에 못 넣는다
-  (넣으면 재생 시 "Voice must extend Monophonic" 에러). 예전 '플럭'이 그 버그였고, Synth 기반으로 고쳤다.
+  (넣으면 재생 시 "Voice must extend Monophonic" 에러). 예전 '플럭'이 그 버그였고 Synth 기반으로 고쳤다.
 
 ### 상단 고정 재생바 + 트랙 고정
 
@@ -46,8 +47,9 @@ python3 -m http.server 8000
 - **🔒 트랙 고정**: 켜면 한 트랙을 가로로 스크롤할 때 **모든 트랙이 같은 위치로 함께** 움직인다
   (`syncTracksHorizontally`, 각 트랙 `_hscroll`의 scroll 이벤트로 나머지를 맞춤, 피드백 루프는 `syncingScroll`로 방지).
   상태는 localStorage에 기억한다.
-- 가로/세로 스크롤은 트랙마다 중첩 컨테이너로 분리(가로 `hscroll`·세로 `vscroll`). **flex 항목이 격자 크기만큼
-  커지지 않도록 `.track`에 `min-width:0`**을 줘야 hscroll이 실제로 넘쳐 가로 스크롤이 생긴다(안 주면 스크롤이 안 됨).
+- 가로/세로 스크롤은 트랙마다 **한 컨테이너(`.gridscroll`)** 가 맡고 `touch-action: pan-x pan-y`로 양축을 허용한다.
+  (축을 나눠 중첩하면 안쪽 컨테이너의 touch-action이 격자를 한 축으로 제한해 다른 축이 막힌다.) 가로 스크롤이
+  실제로 생기려면 **flex 항목이 격자 크기만큼 커지지 않게 `.track`에 `min-width:0`**이 필요하다.
 
 ### 넓은 음역 + 세로 스크롤
 

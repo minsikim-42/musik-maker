@@ -169,8 +169,10 @@ migration을 챙길 것**: 예전 저장은 멜로디 13줄(`LEGACY_MELODY_NOTES
 - **격자 가로 스크롤이 안 되면 `min-width:0`을 의심하라.** `.track`은 `.tracks`(flex column)의 항목이라
   `min-width:auto`(=min-content)로 격자 크기만큼 커져 `hscroll`이 넘치지 않는다 → 가로 스크롤이 안 생긴다.
   `.track`(그리고 `.tracks`)에 `min-width:0`을 줘야 컨테이너 폭에 맞춰 줄고 `hscroll`이 실제로 스크롤한다.
-- **모바일에서 가로가 안 움직이면 `touch-action`을 의심하라.** 한 요소가 두 축을 다 스크롤하면 모바일이
-  첫 방향으로 축을 고정한다. 세로(`vscroll` `pan-y`)·가로(`hscroll` `pan-x`)를 중첩 분리해 각 축을 따로 맡긴다.
+- **격자 스크롤은 한 컨테이너(`.gridscroll`)에서 `touch-action: pan-x pan-y`로 양축을 허용한다.**
+  축을 나눠 중첩하면(안쪽 pan-x/바깥 pan-y) 안쪽 컨테이너의 touch-action이 **격자 전체를 그 축으로 제한**해
+  바깥 축(세로)이 터치로 안 움직인다(실제로 겪음). 한 요소가 두 축을 맡는 게 맞다 — 가로가 안 되던 진짜 원인은
+  아래 `min-width:0`이었지 touch-action이 아니었다.
 - **정적 배포라 캐시가 옛 버전을 붙든다.** `index.html`의 `app.js?v=N`·`style.css?v=N`을 **바꿀 때마다 N을 올린다**
   (안 올리면 브라우저·GitHub Pages가 옛 파일을 준다 — 사용자가 새로고침해야 겨우 반영되던 문제).
 - **`[hidden]`이 `display:flex`를 이기게** `style.css` 맨 위에 `[hidden]{display:none !important}`가 있다.

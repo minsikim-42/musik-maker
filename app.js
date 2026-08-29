@@ -107,10 +107,13 @@ function createVoices(track, out) {
       envelope: { attack: 0.002, decay: 0.2, sustain: 0, release: 0.15 },
     });
   } else if (track.instrument === "guitar") {
-    // 기타: 톱니로 밝게, 빠른 어택 + 감쇠로 뜯는 줄 느낌
-    poly = new Tone.PolySynth(Tone.Synth, {
-      oscillator: { type: "sawtooth" },
-      envelope: { attack: 0.005, decay: 0.5, sustain: 0.08, release: 0.4 },
+    // 통기타: FM으로 배음 많은 뜯는 줄. 빠른 어택 + 긴 감쇠로 자연스럽게 잦아든다.
+    poly = new Tone.PolySynth(Tone.FMSynth, {
+      harmonicity: 3, modulationIndex: 14,
+      oscillator: { type: "sine" },
+      envelope: { attack: 0.003, decay: 1.4, sustain: 0.02, release: 0.7 },
+      modulation: { type: "square" },
+      modulationEnvelope: { attack: 0.002, decay: 0.25, sustain: 0, release: 0.2 },
     });
   } else if (track.instrument === "bass") {
     poly = new Tone.PolySynth(Tone.Synth, {
@@ -118,10 +121,13 @@ function createVoices(track, out) {
       envelope: { attack: 0.01, decay: 0.2, sustain: 0.4, release: 0.4 },
     });
   } else if (track.instrument === "wind") {
-    // 관악기: 부드러운 어택 + 긴 지속(플루트풍 입김 소리)
-    poly = new Tone.PolySynth(Tone.Synth, {
+    // 클라리넷: FM으로 홀수 배음의 목관 소리. 부드러운 어택 + 긴 지속.
+    poly = new Tone.PolySynth(Tone.FMSynth, {
+      harmonicity: 2, modulationIndex: 6,
       oscillator: { type: "sine" },
-      envelope: { attack: 0.09, decay: 0.1, sustain: 0.9, release: 0.4 },
+      envelope: { attack: 0.07, decay: 0.1, sustain: 0.85, release: 0.35 },
+      modulation: { type: "sine" },
+      modulationEnvelope: { attack: 0.1, decay: 0.2, sustain: 0.9, release: 0.35 },
     });
   } else if (track.instrument === "synth") {
     poly = new Tone.PolySynth(Tone.Synth);
@@ -302,7 +308,7 @@ function renderTrack(track) {
     if (val === curVal) o.selected = true;
     sel.appendChild(o);
   };
-  for (const [val, lbl] of [["piano", "피아노"], ["synth", "신스"], ["pluck", "플럭"], ["bass", "베이스"], ["guitar", "기타"], ["wind", "관악기"]]) addOpt(val, lbl);
+  for (const [val, lbl] of [["piano", "피아노"], ["synth", "신스"], ["pluck", "플럭"], ["bass", "베이스"], ["guitar", "기타(통기타)"], ["wind", "클라리넷"]]) addOpt(val, lbl);
   for (const snd of soundLib) addOpt("snd:" + snd.id, "🎹 " + snd.name);
   addOpt("__manage", "🎹 소리 만들기·편집…");
   addOpt("drums", "드럼");
@@ -375,35 +381,25 @@ function renderTrack(track) {
     }
   });
 
-  // 가로 스크롤은 모든 트랙 공통(hscroll). 멜로디는 세로 스크롤(vscroll)을 추가로 감싼다.
-  const hscroll = document.createElement("div");
-  hscroll.className = "hscroll";
-  hscroll.appendChild(grid);
-  track._hscroll = hscroll;
-  hscroll.addEventListener("scroll", () => {
-    track._scrollLeft = hscroll.scrollLeft;
-    syncTracksHorizontally(hscroll); // '트랙 고정'이 켜져 있으면 나머지 트랙도 맞춘다
+  // 가로·세로를 한 컨테이너에서 스크롤(양축 touch-action 허용). 멜로디는 tall(세로 스크롤).
+  const box = document.createElement("div");
+  box.className = "gridscroll" + (track.type === "melody" ? " tall" : "");
+  box.appendChild(grid);
+  track._hscroll = box; // '트랙 고정' 가로 동기화 대상(같은 요소가 세로도 스크롤)
+  box.addEventListener("scroll", () => {
+    track._scrollTop = box.scrollTop;
+    track._scrollLeft = box.scrollLeft;
+    syncTracksHorizontally(box); // '트랙 고정'이 켜져 있으면 나머지 트랙 가로도 맞춘다
   });
+  if (track.type === "melody") enableDragScroll(box, grid); // 마우스 세로 드래그(grid._dragged로 클릭 취소)
 
-  if (track.type === "melody") {
-    // 세로·가로 분리 — 모바일 축 고정 충돌 방지
-    const vscroll = document.createElement("div");
-    vscroll.className = "vscroll";
-    vscroll.appendChild(hscroll);
-    enableDragScroll(vscroll, grid);   // 마우스 세로 드래그(grid._dragged로 클릭 취소)
-    vscroll.addEventListener("scroll", () => { track._scrollTop = vscroll.scrollTop; });
-
-    const rowH = 26; // 셀 24 + 간격 2
-    const initTop = track._scrollTop != null ? track._scrollTop : Math.max(0, MELODY_NOTES.indexOf(DEFAULT_TOP_NOTE) * rowH);
-    requestAnimationFrame(() => {
-      vscroll.scrollTop = initTop;
-      if (track._scrollLeft != null) hscroll.scrollLeft = track._scrollLeft;
-    });
-    wrap.appendChild(vscroll);
-  } else {
-    if (track._scrollLeft != null) requestAnimationFrame(() => { hscroll.scrollLeft = track._scrollLeft; });
-    wrap.appendChild(hscroll);
-  }
+  const rowH = 26; // 셀 24 + 간격 2
+  const defTop = track.type === "melody" ? Math.max(0, MELODY_NOTES.indexOf(DEFAULT_TOP_NOTE) * rowH) : 0;
+  requestAnimationFrame(() => {
+    box.scrollTop = track._scrollTop != null ? track._scrollTop : defTop;
+    if (track._scrollLeft != null) box.scrollLeft = track._scrollLeft;
+  });
+  wrap.appendChild(box);
   return wrap;
 }
 
