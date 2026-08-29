@@ -9,14 +9,18 @@
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <!-- 왼쪽에서 밀려나오는 메뉴(드로어) -->
+  <!-- 왼쪽에서 밀려나오는 세션(내 곡) 목록 + 메뉴 -->
   <div id="drawer" class="drawer" aria-hidden="true">
     <div class="drawer-head">
-      <span>메뉴</span>
+      <span>내 곡</span>
       <button id="drawerClose" class="icon-btn" aria-label="메뉴 닫기">✕</button>
     </div>
+    <button id="newSong" class="new-song">＋ 새 곡</button>
+    <div id="sessionList" class="session-list"><!-- JS가 채운다 --></div>
+
+    <div class="menu-section-title">앞으로 추가할 기능</div>
     <nav id="menuList" class="menu-list"><!-- JS가 채운다 --></nav>
-    <p class="drawer-foot">준비 중인 기능은 잠금(🔒)으로 표시됩니다.</p>
+    <p class="drawer-foot">곡은 이 브라우저에 자동 저장됩니다.</p>
   </div>
   <div id="scrim" class="scrim" hidden></div>
 
@@ -26,7 +30,7 @@
     </button>
     <div class="brand">
       <h1>music-maker</h1>
-      <p class="sub">트랙마다 악기를 고르고, 칸을 눌러 음을 찍고, ▶ 재생</p>
+      <p class="sub">현재 곡: <span id="songName">—</span></p>
     </div>
   </header>
 
