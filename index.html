@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>music-maker</title>
+  <!-- 소리 엔진: Tone.js. 브라우저에 인터넷이 있으면 CDN에서 불러온다.
+       (나중에 오프라인/배포용으로는 파일을 프로젝트에 받아 두면 된다.) -->
+  <script src="https://unpkg.com/tone@14.8.49/build/Tone.js"></script>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header>
+    <h1>music-maker</h1>
+    <p class="sub">칸을 눌러 음을 찍고 ▶ 재생을 누르세요</p>
+  </header>
+
+  <section class="controls">
+    <button id="play" class="primary">▶ 재생</button>
+    <button id="stop">⏹ 정지</button>
+
+    <label>악기
+      <select id="instrument">
+        <option value="piano">피아노</option>
+        <option value="synth">신스</option>
+        <option value="pluck">플럭(뜯는 음)</option>
+      </select>
+    </label>
+
+    <label>템포 <span id="bpmVal">120</span> BPM
+      <input id="bpm" type="range" min="40" max="220" value="120" />
+    </label>
+
+    <button id="clear">지우기</button>
+  </section>
+
+  <!-- 피아노 롤 격자: 가로=시간(스텝), 세로=음 높이. JS가 채운다. -->
+  <div id="grid" class="grid" aria-label="피아노 롤"></div>
+
+  <footer>
+    <span>가로 = 시간(왼→오), 세로 = 음 높이(위가 높음)</span>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
