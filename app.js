@@ -284,7 +284,10 @@ const LS_ACTIVE = "music-maker.activeId";
 
 let sessions = [];   // [{ id, name, updatedAt, data }]
 let activeId = null;
-let loading = false; // 곡을 불러오는 동안 자동 저장이 끼어들지 않게
+let loading = false;   // 곡을 불러오는 동안 자동 저장이 끼어들지 않게
+let hasLoaded = false; // 첫 곡을 아직 안 열었으면 flushSave가 빈 편집기를 저장하지 않게
+
+function genId() { return "s" + Date.now() + Math.floor(Math.random() * 1000); }
 
 function lsGet(key) { try { return localStorage.getItem(key); } catch { return null; } }
 function lsSet(key, val) { try { localStorage.setItem(key, val); } catch { /* 저장 불가 시 메모리에만 */ } }
@@ -345,7 +348,7 @@ function freshSongData() {
 
 function newSong(switchTo = true) {
   const n = sessions.length + 1;
-  const s = { id: "s" + Date.now() + Math.floor(Math.random() * 1000), name: "새 곡 " + n, updatedAt: Date.now(), data: freshSongData() };
+  const s = { id: genId(), name: "새 곡 " + n, updatedAt: Date.now(), data: freshSongData() };
   sessions.unshift(s);
   persistSessions();
   if (switchTo) openSession(s.id);
@@ -373,14 +376,20 @@ function saveActive() {
   renderSessionList();
 }
 
+function flushSave() {
+  if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
+  saveActive();
+}
+
 function openSession(id) {
   const s = sessions.find((x) => x.id === id);
   if (!s) return;
-  // 전환 전에 현재 곡을 확실히 저장
-  if (saveTimer) { clearTimeout(saveTimer); saveActive(); }
+  // 전환 전에 '나가는' 곡을 확실히 저장(첫 로드 때는 편집기가 비어 있으므로 건너뜀)
+  if (hasLoaded) flushSave();
   activeId = id;
   lsSet(LS_ACTIVE, id);
   deserialize(s.data);
+  hasLoaded = true;
   songNameEl.textContent = s.name;
   renderSessionList();
 }
@@ -523,11 +532,12 @@ document.getElementById("newSong").addEventListener("click", () => newSong(true)
 // ══════════════════════════════════════════════════════════════
 //  왼쪽 드로어 + 앞으로 추가할 기능
 // ══════════════════════════════════════════════════════════════
+// action이 있으면 실제로 동작하는 항목(잠금 아님), tag만 있으면 준비 중.
 const MENU = [
+  { ico: "🔗", name: "링크로 공유 (다른 기기)", action: () => { closeDrawer(); openShareModal(); } },
   { ico: "🎹", name: "신디사이저 (음색 편집)", tag: "준비 중" },
   { ico: "⚙️", name: "환경설정", tag: "준비 중" },
   { ico: "📤", name: "WAV로 내보내기", tag: "예정" },
-  { ico: "🔗", name: "링크로 공유 (다른 기기)", tag: "4단계" },
   { ico: "🎼", name: "오선지 악보 보기", tag: "예정" },
 ];
 
@@ -539,11 +549,19 @@ let toastTimer = null;
 
 for (const item of MENU) {
   const btn = document.createElement("button");
-  btn.className = "menu-item locked";
-  btn.innerHTML = `<span class="ico">${item.ico}</span>
-    <span class="name">${item.name}</span>
-    <span class="tag">🔒 ${item.tag}</span>`;
-  btn.addEventListener("click", () => showToast(`"${item.name}"은(는) ${item.tag} — 곧 추가됩니다`));
+  if (item.action) {
+    btn.className = "menu-item";
+    btn.innerHTML = `<span class="ico">${item.ico}</span>
+      <span class="name">${item.name}</span>
+      <span class="tag">사용 가능</span>`;
+    btn.addEventListener("click", item.action);
+  } else {
+    btn.className = "menu-item locked";
+    btn.innerHTML = `<span class="ico">${item.ico}</span>
+      <span class="name">${item.name}</span>
+      <span class="tag">🔒 ${item.tag}</span>`;
+    btn.addEventListener("click", () => showToast(`"${item.name}"은(는) ${item.tag} — 곧 추가됩니다`));
+  }
   menuList.appendChild(btn);
 }
 
@@ -581,12 +599,189 @@ function showToast(msg, actionLabel, onAction) {
 }
 
 // ══════════════════════════════════════════════════════════════
+//  링크 공유 (다른 기기) — 곡을 URL에 통째로 담는다 (서버 없음)
+// ══════════════════════════════════════════════════════════════
+// 격자가 불리언이라 그대로 JSON에 담으면 링크가 너무 길어진다.
+// → 비트로 패킹해 base64로 만들어 링크를 짧게 유지한다.
+const INSTR_LIST = ["piano", "synth", "pluck", "bass"];
+
+function bytesToB64url(bytes) {
+  let bin = "";
+  for (const b of bytes) bin += String.fromCharCode(b);
+  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+function b64urlToBytes(str) {
+  str = str.replace(/-/g, "+").replace(/_/g, "/");
+  const bin = atob(str);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+function encodeShare(name, data) {
+  const bytes = [];
+  bytes.push(1); // 버전
+  const nameB = Array.from(new TextEncoder().encode(name)).slice(0, 255);
+  bytes.push(nameB.length, ...nameB);
+  bytes.push(Math.max(0, Math.min(255, data.bpm || 120)));
+  bytes.push(data.bars);
+  bytes.push(data.tracks.length);
+  for (const t of data.tracks) {
+    bytes.push(t.type === "drums" ? 1 : 0);
+    const instr = t.type === "drums" ? 0 : Math.max(0, INSTR_LIST.indexOf(t.instrument));
+    bytes.push(instr);
+    bytes.push(t.muted ? 1 : 0);
+    const tnB = Array.from(new TextEncoder().encode(t.name)).slice(0, 255);
+    bytes.push(tnB.length, ...tnB);
+    // 격자 비트 패킹
+    let cur = 0, nb = 0;
+    for (let r = 0; r < t.grid.length; r++)
+      for (let c = 0; c < t.grid[r].length; c++) {
+        cur = (cur << 1) | (t.grid[r][c] ? 1 : 0);
+        if (++nb === 8) { bytes.push(cur); cur = 0; nb = 0; }
+      }
+    if (nb > 0) bytes.push(cur << (8 - nb));
+  }
+  return bytesToB64url(Uint8Array.from(bytes));
+}
+
+function decodeShare(code) {
+  const b = b64urlToBytes(code);
+  let i = 0;
+  const ver = b[i++];
+  if (ver !== 1) throw new Error("알 수 없는 공유 버전");
+  const nlen = b[i++];
+  const name = new TextDecoder().decode(b.slice(i, i + nlen)); i += nlen;
+  const bpm = b[i++];
+  const bars = b[i++];
+  const steps = bars * STEPS_PER_BAR;
+  const n = b[i++];
+  const tracks = [];
+  for (let k = 0; k < n; k++) {
+    const type = b[i++] === 1 ? "drums" : "melody";
+    const instr = b[i++];
+    const muted = b[i++] === 1;
+    const tnlen = b[i++];
+    const tname = new TextDecoder().decode(b.slice(i, i + tnlen)); i += tnlen;
+    const rows = type === "drums" ? DRUM_ROWS.length : MELODY_NOTES.length;
+    const total = rows * steps;
+    const need = Math.ceil(total / 8);
+    const gb = b.slice(i, i + need); i += need;
+    const grid = [];
+    let idx = 0;
+    for (let r = 0; r < rows; r++) {
+      const row = [];
+      for (let c = 0; c < steps; c++) {
+        const bit = (gb[idx >> 3] >> (7 - (idx & 7))) & 1;
+        row.push(!!bit); idx++;
+      }
+      grid.push(row);
+    }
+    tracks.push({ type, instrument: type === "drums" ? null : (INSTR_LIST[instr] || "piano"), name: tname, muted, grid });
+  }
+  return { name, bpm, bars, tracks };
+}
+
+// 공유 모달
+const modal = document.getElementById("modal");
+const modalTitle = document.getElementById("modalTitle");
+const modalBody = document.getElementById("modalBody");
+
+function openShareModal() {
+  const s = activeSession();
+  if (!s) return;
+  if (hasLoaded) flushSave(); // 최신 편집을 반영
+  let code, url, err = null;
+  try {
+    code = encodeShare(s.name, s.data);
+    url = location.origin + location.pathname + "#song=" + code;
+  } catch (e) { err = e; }
+
+  modalTitle.textContent = "「" + s.name + "」 공유";
+  modalBody.innerHTML = "";
+  if (err) {
+    const p = document.createElement("p");
+    p.textContent = "링크를 만들지 못했습니다: " + err.message;
+    modalBody.appendChild(p);
+  } else {
+    const p = document.createElement("p");
+    p.textContent = "이 링크를 열면 지금 이 곡이 그대로 열립니다. 나에게(카톡·메일 등) 보내 다른 기기에서 열어 보세요.";
+    modalBody.appendChild(p);
+
+    const row = document.createElement("div");
+    row.className = "share-row";
+    const input = document.createElement("input");
+    input.className = "share-url";
+    input.readOnly = true;
+    input.value = url;
+    const copyBtn = document.createElement("button");
+    copyBtn.textContent = "복사";
+    copyBtn.addEventListener("click", async () => {
+      const ok = await copyText(url, input);
+      copyBtn.textContent = ok ? "복사됨 ✓" : "직접 복사하세요";
+      setTimeout(() => (copyBtn.textContent = "복사"), 1800);
+    });
+    row.appendChild(input);
+    row.appendChild(copyBtn);
+    modalBody.appendChild(row);
+
+    // localhost면 다른 기기에서 안 열린다는 안내
+    if (/^(localhost|127\.|0\.0\.0\.0)/.test(location.hostname) || location.protocol === "file:") {
+      const note = document.createElement("p");
+      note.className = "share-note";
+      note.textContent = "⚠ 지금은 이 컴퓨터에서만 열리는 주소(localhost)입니다. 다른 기기에서 열려면 앱을 공개 주소(예: GitHub Pages)에 올려야 합니다. 링크의 #song= 뒤 코드는 그대로 옮겨서 씁니다.";
+      modalBody.appendChild(note);
+    }
+  }
+  modal.hidden = false;
+}
+function closeModal() { modal.hidden = true; }
+
+async function copyText(text, inputEl) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    // 폴백: 입력창 선택 후 execCommand
+    try {
+      inputEl.focus(); inputEl.select();
+      return document.execCommand("copy");
+    } catch { return false; }
+  }
+}
+
+document.getElementById("modalClose").addEventListener("click", closeModal);
+modal.addEventListener("click", (e) => { if (e.target === modal) closeModal(); });
+document.getElementById("share").addEventListener("click", openShareModal);
+
+// 링크(#song=...)로 들어왔으면 새 곡으로 가져온다
+function importFromHash() {
+  const m = (location.hash || "").match(/^#song=(.+)$/);
+  if (!m) return null;
+  try {
+    const d = decodeShare(m[1]);
+    const s = { id: genId(), name: d.name || "공유받은 곡", updatedAt: Date.now(),
+      data: { bpm: d.bpm, bars: d.bars, tracks: d.tracks } };
+    sessions.unshift(s);
+    persistSessions();
+    history.replaceState(null, "", location.pathname); // 주소창의 코드 정리
+    return s.id;
+  } catch (e) {
+    console.warn("공유 링크 해석 실패:", e);
+    return null;
+  }
+}
+
+// ══════════════════════════════════════════════════════════════
 //  시작
 // ══════════════════════════════════════════════════════════════
 loadSessionsFromStorage();
-if (sessions.length === 0) {
-  newSong(true);            // 처음 방문: 빈 곡 하나 만들고 연다
+const importedId = importFromHash();
+if (importedId) {
+  openSession(importedId);          // 공유 링크로 들어옴 → 그 곡을 연다
+  setTimeout(() => showToast("공유받은 곡을 내 곡 목록에 담았습니다"), 300);
+} else if (sessions.length === 0) {
+  newSong(true);                    // 처음 방문: 빈 곡 하나 만들고 연다
 } else {
-  const start = activeSession() ? activeId : sessions[0].id;
-  openSession(start);       // 지난번 곡을 이어서 연다
+  openSession(activeSession() ? activeId : sessions[0].id); // 지난번 곡 이어서
 }

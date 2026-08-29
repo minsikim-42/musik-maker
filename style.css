@@ -14,6 +14,10 @@
 
 * { box-sizing: border-box; }
 
+/* display:flex 등을 준 요소도 hidden이면 확실히 숨긴다
+   (author의 display 규칙이 UA의 [hidden]{display:none}을 이기는 문제 방지) */
+[hidden] { display: none !important; }
+
 body {
   margin: 0;
   font-family: system-ui, -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
@@ -282,4 +286,52 @@ footer { margin-top: 14px; color: var(--muted); font-size: 12px; }
   padding: 5px 12px;
   font-weight: 600;
   cursor: pointer;
+}
+
+/* ── 모달(공유 팝업) ────────────────────── */
+.modal {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0,0,0,.55);
+  z-index: 50;
+  padding: 20px;
+}
+.modal-card {
+  width: 100%;
+  max-width: 460px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 18px;
+}
+.modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-weight: 600;
+  font-size: 16px;
+  margin-bottom: 12px;
+}
+.modal-head .icon-btn { width: 32px; height: 32px; padding: 0; align-items: center; gap: 0; font-size: 14px; }
+#modalBody p { color: var(--muted); font-size: 13px; line-height: 1.5; margin: 0 0 12px; }
+.share-row { display: flex; gap: 8px; margin-bottom: 12px; }
+.share-url {
+  flex: 1; min-width: 0;
+  background: #10141c;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 12px;
+  color: var(--text);
+  font-size: 13px;
+}
+.share-note {
+  background: #1a1508;
+  border: 1px solid #4a3c14;
+  border-radius: 8px;
+  padding: 10px 12px;
+  color: #e9c46a !important;
+  font-size: 12.5px !important;
 }

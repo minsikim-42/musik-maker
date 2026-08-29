@@ -52,6 +52,7 @@
 
     <button id="addMelody">＋ 멜로디 트랙</button>
     <button id="addDrums">＋ 드럼 트랙</button>
+    <button id="share">🔗 공유</button>
   </section>
 
   <!-- 트랙들이 세로로 쌓인다. JS가 채운다. -->
@@ -62,6 +63,17 @@
   </footer>
 
   <div id="toast" class="toast" hidden></div>
+
+  <!-- 공유 등 팝업 -->
+  <div id="modal" class="modal" hidden>
+    <div class="modal-card">
+      <div class="modal-head">
+        <span id="modalTitle">곡 공유</span>
+        <button id="modalClose" class="icon-btn" aria-label="닫기">✕</button>
+      </div>
+      <div id="modalBody"></div>
+    </div>
+  </div>
 
   <script src="app.js"></script>
 </body>
