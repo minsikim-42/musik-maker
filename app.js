@@ -39,6 +39,18 @@ function buildSynth(track) {
     return { kind: "drums", kick, snare, hat, hatOut };
   }
 
+  // 커스텀: 사용자가 만든 음색(파라미터). 로우패스 필터를 거쳐 컷오프까지 조절.
+  if (track.instrument === "custom") {
+    const p = track.params || defaultParams();
+    const filt = new Tone.Filter(p.cutoff, "lowpass").toDestination();
+    const poly = new Tone.PolySynth(Tone.Synth, {
+      oscillator: { type: p.wave },
+      envelope: { attack: p.attack, decay: p.decay, sustain: p.sustain, release: p.release },
+    }).connect(filt);
+    poly.volume.value = p.volume;
+    return { kind: "melody", poly, filt };
+  }
+
   let poly;
   if (track.instrument === "pluck") {
     poly = new Tone.PolySynth(Tone.PluckSynth);
@@ -60,10 +72,24 @@ function buildSynth(track) {
   return { kind: "melody", poly };
 }
 
+// 커스텀 음색 기본값
+function defaultParams() {
+  return { wave: "sawtooth", attack: 0.01, decay: 0.2, sustain: 0.4, release: 0.6, cutoff: 2000, volume: -8 };
+}
+// 편집기에서 슬라이더를 움직일 때: 트랙 신스에 즉시 반영(재생성 없이)
+function applyParamsLive(track) {
+  const s = track.synth;
+  if (!s || s.kind !== "melody" || !s.poly.set) return;
+  const p = track.params;
+  s.poly.set({ oscillator: { type: p.wave }, envelope: { attack: p.attack, decay: p.decay, sustain: p.sustain, release: p.release } });
+  s.poly.volume.value = p.volume;
+  if (s.filt) s.filt.frequency.value = p.cutoff;
+}
+
 function disposeSynth(s) {
   if (!s) return;
   if (s.kind === "drums") { s.kick.dispose(); s.snare.dispose(); s.hat.dispose(); s.hatOut.dispose(); }
-  else s.poly.dispose();
+  else { s.poly.dispose(); if (s.filt) s.filt.dispose(); }
 }
 
 function triggerTrack(track, col, time) {
@@ -109,10 +135,13 @@ function makeTrackObj(type, data) {
     instrument: data?.instrument ?? (type === "drums" ? null : "piano"),
     name: data?.name ?? (type === "drums" ? "드럼" : "멜로디 " + trackSeq),
     muted: data?.muted ?? false,
+    // 커스텀 음색 파라미터(악기가 custom일 때만 의미. 저장된 값이 있으면 채운다)
+    params: data?.params ? { ...defaultParams(), ...data.params } : null,
     grid: null,
     synth: null,
     cellEls: null,
   };
+  if (track.instrument === "custom" && !track.params) track.params = defaultParams();
   // 격자: 저장된 값이 있으면 현재 steps에 맞춰 정규화, 없으면 빈 격자
   track.grid = rows.map((_, r) => {
     const row = new Array(steps).fill(false);
@@ -181,7 +210,7 @@ function renderTrack(track) {
 
   if (track.type === "melody") {
     const sel = document.createElement("select");
-    for (const [val, lbl] of [["piano", "피아노"], ["synth", "신스"], ["pluck", "플럭"], ["bass", "베이스"]]) {
+    for (const [val, lbl] of [["piano", "피아노"], ["synth", "신스"], ["pluck", "플럭"], ["bass", "베이스"], ["custom", "커스텀 🎹"]]) {
       const o = document.createElement("option");
       o.value = val; o.textContent = lbl;
       if (track.instrument === val) o.selected = true;
@@ -189,10 +218,20 @@ function renderTrack(track) {
     }
     sel.addEventListener("change", () => {
       track.instrument = sel.value;
+      if (track.instrument === "custom" && !track.params) track.params = defaultParams();
       track.synth = buildSynth(track);
+      render();       // '음색' 버튼 노출/숨김 갱신
       markDirty();
     });
     head.appendChild(sel);
+
+    // 커스텀일 때만 음색 편집 버튼
+    if (track.instrument === "custom") {
+      const toneBtn = document.createElement("button");
+      toneBtn.textContent = "🎹 음색";
+      toneBtn.addEventListener("click", () => openSynthModal(track));
+      head.appendChild(toneBtn);
+    }
   }
 
   const muteBtn = document.createElement("button");
@@ -309,6 +348,7 @@ function serialize() {
       instrument: t.instrument,
       name: t.name,
       muted: t.muted,
+      params: t.instrument === "custom" && t.params ? { ...t.params } : null,
       grid: t.grid.map((row) => row.slice()),
     })),
   };
@@ -535,11 +575,18 @@ document.getElementById("newSong").addEventListener("click", () => newSong(true)
 // action이 있으면 실제로 동작하는 항목(잠금 아님), tag만 있으면 준비 중.
 const MENU = [
   { ico: "🔗", name: "링크로 공유 (다른 기기)", action: () => { closeDrawer(); openShareModal(); } },
-  { ico: "🎹", name: "신디사이저 (음색 편집)", tag: "준비 중" },
+  { ico: "🎹", name: "신디사이저 (음색 편집)", action: () => { closeDrawer(); openSynthFromMenu(); } },
   { ico: "⚙️", name: "환경설정", tag: "준비 중" },
   { ico: "📤", name: "WAV로 내보내기", tag: "예정" },
   { ico: "🎼", name: "오선지 악보 보기", tag: "예정" },
 ];
+
+// 메뉴에서 열면: 커스텀 트랙이 있으면 그 음색을, 없으면 안내
+function openSynthFromMenu() {
+  const custom = tracks.find((t) => t.type === "melody" && t.instrument === "custom");
+  if (custom) openSynthModal(custom);
+  else showToast("멜로디 트랙 악기를 '커스텀 🎹'으로 바꾸면 음색을 편집할 수 있어요");
+}
 
 const drawer = document.getElementById("drawer");
 const scrim = document.getElementById("scrim");
@@ -603,7 +650,12 @@ function showToast(msg, actionLabel, onAction) {
 // ══════════════════════════════════════════════════════════════
 // 격자가 불리언이라 그대로 JSON에 담으면 링크가 너무 길어진다.
 // → 비트로 패킹해 base64로 만들어 링크를 짧게 유지한다.
-const INSTR_LIST = ["piano", "synth", "pluck", "bass"];
+const INSTR_LIST = ["piano", "synth", "pluck", "bass", "custom"];
+const WAVE_LIST = ["sine", "triangle", "square", "sawtooth"];
+// 커스텀 음색 파라미터를 바이트로 양자화(공유 링크에 싣기 위해). [min,max]
+const PARAM_RANGES = { attack: [0, 2], decay: [0, 2], sustain: [0, 1], release: [0, 3], cutoff: [200, 8000], volume: [-30, 0] };
+const q8 = (v, [lo, hi]) => Math.max(0, Math.min(255, Math.round(((v - lo) / (hi - lo)) * 255)));
+const dq8 = (b, [lo, hi]) => lo + (b / 255) * (hi - lo);
 
 function bytesToB64url(bytes) {
   let bin = "";
@@ -620,7 +672,7 @@ function b64urlToBytes(str) {
 
 function encodeShare(name, data) {
   const bytes = [];
-  bytes.push(1); // 버전
+  bytes.push(2); // 버전 2: 커스텀 음색 파라미터 지원(v1은 커스텀 없음, 하위호환)
   const nameB = Array.from(new TextEncoder().encode(name)).slice(0, 255);
   bytes.push(nameB.length, ...nameB);
   bytes.push(Math.max(0, Math.min(255, data.bpm || 120)));
@@ -633,6 +685,17 @@ function encodeShare(name, data) {
     bytes.push(t.muted ? 1 : 0);
     const tnB = Array.from(new TextEncoder().encode(t.name)).slice(0, 255);
     bytes.push(tnB.length, ...tnB);
+    // 커스텀 음색: 파라미터 7바이트(파형 + ADSR + 컷오프 + 볼륨)
+    if (t.type === "melody" && t.instrument === "custom") {
+      const p = { ...defaultParams(), ...(t.params || {}) };
+      bytes.push(Math.max(0, WAVE_LIST.indexOf(p.wave)));
+      bytes.push(q8(p.attack, PARAM_RANGES.attack));
+      bytes.push(q8(p.decay, PARAM_RANGES.decay));
+      bytes.push(q8(p.sustain, PARAM_RANGES.sustain));
+      bytes.push(q8(p.release, PARAM_RANGES.release));
+      bytes.push(q8(p.cutoff, PARAM_RANGES.cutoff));
+      bytes.push(q8(p.volume, PARAM_RANGES.volume));
+    }
     // 격자 비트 패킹
     let cur = 0, nb = 0;
     for (let r = 0; r < t.grid.length; r++)
@@ -649,7 +712,7 @@ function decodeShare(code) {
   const b = b64urlToBytes(code);
   let i = 0;
   const ver = b[i++];
-  if (ver !== 1) throw new Error("알 수 없는 공유 버전");
+  if (ver !== 1 && ver !== 2) throw new Error("알 수 없는 공유 버전");
   const nlen = b[i++];
   const name = new TextDecoder().decode(b.slice(i, i + nlen)); i += nlen;
   const bpm = b[i++];
@@ -663,6 +726,19 @@ function decodeShare(code) {
     const muted = b[i++] === 1;
     const tnlen = b[i++];
     const tname = new TextDecoder().decode(b.slice(i, i + tnlen)); i += tnlen;
+    // 커스텀 음색 파라미터(v2에서, 커스텀 멜로디 트랙만)
+    let params = null;
+    if (ver >= 2 && type === "melody" && INSTR_LIST[instr] === "custom") {
+      params = {
+        wave: WAVE_LIST[b[i++]] || "sawtooth",
+        attack: dq8(b[i++], PARAM_RANGES.attack),
+        decay: dq8(b[i++], PARAM_RANGES.decay),
+        sustain: dq8(b[i++], PARAM_RANGES.sustain),
+        release: dq8(b[i++], PARAM_RANGES.release),
+        cutoff: dq8(b[i++], PARAM_RANGES.cutoff),
+        volume: dq8(b[i++], PARAM_RANGES.volume),
+      };
+    }
     const rows = type === "drums" ? DRUM_ROWS.length : MELODY_NOTES.length;
     const total = rows * steps;
     const need = Math.ceil(total / 8);
@@ -677,7 +753,7 @@ function decodeShare(code) {
       }
       grid.push(row);
     }
-    tracks.push({ type, instrument: type === "drums" ? null : (INSTR_LIST[instr] || "piano"), name: tname, muted, grid });
+    tracks.push({ type, instrument: type === "drums" ? null : (INSTR_LIST[instr] || "piano"), name: tname, muted, params, grid });
   }
   return { name, bpm, bars, tracks };
 }
@@ -736,6 +812,102 @@ function openShareModal() {
   modal.hidden = false;
 }
 function closeModal() { modal.hidden = true; }
+
+// ── 신디사이저(음색 편집) 모달 ─────────────────────────────────
+function openSynthModal(track) {
+  if (!track.params) track.params = defaultParams();
+  const p = track.params;
+
+  modalTitle.textContent = "🎹 「" + track.name + "」 음색";
+  modalBody.innerHTML = "";
+
+  const intro = document.createElement("p");
+  intro.textContent = "슬라이더를 움직이면 소리에 바로 반영됩니다. 미리듣기로 확인하세요. (저장·공유에도 함께 담깁니다)";
+  modalBody.appendChild(intro);
+
+  // 파형 고르기
+  const waveRow = document.createElement("div");
+  waveRow.className = "wave-row";
+  const WAVE_LABEL = { sine: "사인 ∿", triangle: "삼각 △", square: "사각 ⊓", sawtooth: "톱니 ◺" };
+  for (const w of WAVE_LIST) {
+    const b = document.createElement("button");
+    b.className = "wave-btn" + (p.wave === w ? " on" : "");
+    b.textContent = WAVE_LABEL[w];
+    b.addEventListener("click", () => {
+      p.wave = w;
+      waveRow.querySelectorAll(".wave-btn").forEach((x) => x.classList.remove("on"));
+      b.classList.add("on");
+      applyParamsLive(track); markDirty(); playPreview(track);
+    });
+    waveRow.appendChild(b);
+  }
+  addField("파형", waveRow);
+
+  // ADSR + 필터 + 볼륨 슬라이더
+  slider("어택 (시작 빠르기)", "attack", 0, 2, 0.005, "s", (v) => v.toFixed(3));
+  slider("디케이 (감쇠)", "decay", 0, 2, 0.005, "s", (v) => v.toFixed(3));
+  slider("서스테인 (지속 크기)", "sustain", 0, 1, 0.01, "", (v) => v.toFixed(2));
+  slider("릴리스 (여운)", "release", 0, 3, 0.01, "s", (v) => v.toFixed(2));
+  slider("컷오프 (밝기)", "cutoff", 200, 8000, 10, "Hz", (v) => Math.round(v));
+  slider("볼륨", "volume", -30, 0, 1, "dB", (v) => Math.round(v));
+
+  const btnRow = document.createElement("div");
+  btnRow.className = "share-row";
+  const prev = document.createElement("button");
+  prev.textContent = "▶ 미리듣기";
+  prev.addEventListener("click", () => playPreview(track));
+  const reset = document.createElement("button");
+  reset.textContent = "기본값";
+  reset.addEventListener("click", () => {
+    track.params = defaultParams();
+    applyParamsLive(track); markDirty();
+    openSynthModal(track); // 슬라이더 위치 갱신
+    playPreview(track);
+  });
+  btnRow.appendChild(prev);
+  btnRow.appendChild(reset);
+  modalBody.appendChild(btnRow);
+
+  modal.hidden = false;
+
+  function addField(label, control) {
+    const wrap = document.createElement("label");
+    wrap.className = "synth-field";
+    const head = document.createElement("div");
+    head.className = "synth-label";
+    head.textContent = label;
+    wrap.appendChild(head);
+    wrap.appendChild(control);
+    modalBody.appendChild(wrap);
+  }
+  function slider(label, key, min, max, step, unit, fmt) {
+    const control = document.createElement("div");
+    control.className = "synth-slider";
+    const input = document.createElement("input");
+    input.type = "range";
+    input.min = min; input.max = max; input.step = step;
+    input.value = p[key];
+    const val = document.createElement("span");
+    val.className = "synth-val";
+    val.textContent = fmt(p[key]) + unit;
+    input.addEventListener("input", () => {
+      p[key] = Number(input.value);
+      val.textContent = fmt(p[key]) + unit;
+      applyParamsLive(track); markDirty();
+    });
+    control.appendChild(input);
+    control.appendChild(val);
+    addField(label, control);
+  }
+}
+
+// 커스텀 트랙 음색 미리듣기: 짧은 코드 한 번
+async function playPreview(track) {
+  await Tone.start();
+  if (track.synth && track.synth.poly) {
+    track.synth.poly.triggerAttackRelease(["C4", "E4", "G4"], "8n");
+  }
+}
 
 async function copyText(text, inputEl) {
   try {

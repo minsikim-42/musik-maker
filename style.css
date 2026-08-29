@@ -302,6 +302,8 @@ footer { margin-top: 14px; color: var(--muted); font-size: 12px; }
 .modal-card {
   width: 100%;
   max-width: 460px;
+  max-height: 88vh;
+  overflow-y: auto;
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 14px;
@@ -335,3 +337,24 @@ footer { margin-top: 14px; color: var(--muted); font-size: 12px; }
   color: #e9c46a !important;
   font-size: 12.5px !important;
 }
+
+/* ── 신디사이저 편집기 ──────────────────── */
+.synth-field { display: block; margin-bottom: 12px; }
+.synth-label { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+.synth-slider { display: flex; align-items: center; gap: 10px; }
+.synth-slider input[type="range"] { flex: 1; padding: 0; }
+.synth-val {
+  min-width: 62px;
+  text-align: right;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+.wave-row { display: flex; gap: 6px; flex-wrap: wrap; }
+.wave-btn {
+  flex: 1;
+  min-width: 64px;
+  padding: 8px 6px;
+  font-size: 13px;
+}
+.wave-btn.on { background: var(--accent); color: #0b1020; border-color: var(--accent); font-weight: 600; }
