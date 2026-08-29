@@ -645,7 +645,7 @@ const MENU = [
   { ico: "🎹", name: "신디사이저 (소리 만들기·편집)", action: () => { closeDrawer(); openSoundManager(); } },
   { ico: "⚙️", name: "환경설정", tag: "준비 중" },
   { ico: "📤", name: "WAV로 내보내기", action: () => { closeDrawer(); exportWav(); } },
-  { ico: "🎼", name: "오선지 악보 보기", tag: "예정" },
+  { ico: "🎼", name: "오선지 악보 보기", action: () => { closeDrawer(); openScoreModal(); } },
 ];
 
 
@@ -1194,6 +1194,146 @@ async function exportWav() {
   } finally {
     exporting = false;
   }
+}
+
+// ══════════════════════════════════════════════════════════════
+//  오선지 악보 보기 — 격자를 5선 악보(SVG)로 그린다 (읽기 전용 + PNG 저장)
+// ══════════════════════════════════════════════════════════════
+// 높은음자리표 기준. 음이름 → 오선 위치(diatonic step). B4를 가운데 줄(0)로 둔다.
+const LETTER_IDX = { C: 0, D: 1, E: 2, F: 3, G: 4, A: 5, B: 6 };
+function noteToStaff(note) {
+  const sharp = note.includes("#");
+  const octave = parseInt(note[note.length - 1], 10);
+  const dia = octave * 7 + LETTER_IDX[note[0]];
+  return { staffStep: dia - 34, sharp }; // B4 = 0 (가운데 줄)
+}
+function soundLabel(track) {
+  const s = trackSound(track);
+  if (s) return "🎹 " + s.name;
+  return { piano: "피아노", synth: "신스", pluck: "플럭", bass: "베이스" }[track.instrument] || track.instrument;
+}
+
+// 곡 전체를 하나의 SVG로(멜로디 트랙을 위아래로 쌓음). 흰 바탕·검은 음표(인쇄용).
+function buildScoreSVG() {
+  const gap = 12, clefW = 46, stepW = 18, blockH = 138;
+  const width = clefW + steps * stepW + 24;
+  const melodyTracks = tracks.filter((t) => t.type !== "drums");
+  const height = Math.max(1, melodyTracks.length) * blockH + 12;
+  const esc = (s) => escapeHtml(String(s));
+  let body = "";
+
+  melodyTracks.forEach((track, ti) => {
+    const top = 12 + ti * blockH;
+    const staffTop = top + 30;                 // 맨 위 줄(F5)
+    const midY = staffTop + 2 * gap;            // 가운데 줄(B4)
+    const yFor = (s) => midY - s * (gap / 2);
+    const lineYs = [4, 2, 0, -2, -4].map(yFor);
+    const yTop = yFor(4), yBot = yFor(-4);
+
+    // 트랙 이름 + 악기
+    body += `<text x="8" y="${top + 20}" font-family="sans-serif" font-size="13" fill="#111">${esc(track.name)} · ${esc(soundLabel(track))}</text>`;
+    // 5선
+    for (const y of lineYs) body += `<line x1="${clefW}" y1="${y}" x2="${width - 10}" y2="${y}" stroke="#111" stroke-width="1"/>`;
+    // 높은음자리표
+    body += `<text x="${clefW - 40}" y="${yBot + 3}" font-family="serif" font-size="${gap * 4.2}" fill="#111">𝄞</text>`;
+    // 시작 세로줄
+    body += `<line x1="${clefW}" y1="${yTop}" x2="${clefW}" y2="${yBot}" stroke="#111" stroke-width="1.4"/>`;
+    // 박자/마디 세로줄
+    for (let step = 1; step <= steps; step++) {
+      const x = clefW + step * stepW;
+      if (step % 16 === 0) body += `<line x1="${x}" y1="${yTop}" x2="${x}" y2="${yBot}" stroke="#111" stroke-width="1.4"/>`;
+      else if (step % 4 === 0) body += `<line x1="${x}" y1="${yTop}" x2="${x}" y2="${yBot}" stroke="#ccc" stroke-width="1"/>`;
+    }
+    // 마디 번호
+    for (let m = 0; m * 16 < steps; m++) {
+      const x = clefW + m * 16 * stepW + 3;
+      body += `<text x="${x}" y="${yTop - 5}" font-family="sans-serif" font-size="10" fill="#888">${m + 1}</text>`;
+    }
+    // 음표
+    for (let c = 0; c < steps; c++) {
+      for (let r = 0; r < MELODY_NOTES.length; r++) {
+        if (!track.grid[r][c]) continue;
+        const { staffStep, sharp } = noteToStaff(MELODY_NOTES[r]);
+        const cx = clefW + c * stepW + stepW / 2;
+        const cy = yFor(staffStep);
+        // 보조선(오선 밖 음): 아래로 벗어난 짝수 칸마다
+        if (staffStep <= -6) for (let k = -6; k >= staffStep; k -= 2) body += `<line x1="${cx - 9}" y1="${yFor(k)}" x2="${cx + 9}" y2="${yFor(k)}" stroke="#111" stroke-width="1"/>`;
+        if (staffStep >= 6) for (let k = 6; k <= staffStep; k += 2) body += `<line x1="${cx - 9}" y1="${yFor(k)}" x2="${cx + 9}" y2="${yFor(k)}" stroke="#111" stroke-width="1"/>`;
+        // 기둥(가운데 줄 아래는 위로, 위는 아래로)
+        if (staffStep < 0) body += `<line x1="${cx + 5.5}" y1="${cy}" x2="${cx + 5.5}" y2="${cy - 30}" stroke="#111" stroke-width="1.3"/>`;
+        else body += `<line x1="${cx - 5.5}" y1="${cy}" x2="${cx - 5.5}" y2="${cy + 30}" stroke="#111" stroke-width="1.3"/>`;
+        // 머리
+        body += `<ellipse cx="${cx}" cy="${cy}" rx="6" ry="4.2" fill="#111"/>`;
+        // 올림표
+        if (sharp) body += `<text x="${cx - 17}" y="${cy + 5}" font-family="serif" font-size="16" fill="#111">♯</text>`;
+      }
+    }
+  });
+
+  if (melodyTracks.length === 0) body += `<text x="20" y="46" font-family="sans-serif" font-size="14" fill="#111">멜로디 트랙이 없습니다.</text>`;
+
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">`
+    + `<rect x="0" y="0" width="${width}" height="${height}" fill="#fff"/>${body}</svg>`;
+  return { svg, drumCount: tracks.filter((t) => t.type === "drums").length };
+}
+
+function openScoreModal() {
+  const { svg, drumCount } = buildScoreSVG();
+  modalTitle.textContent = "🎼 악보";
+  modalBody.innerHTML = "";
+
+  const intro = document.createElement("p");
+  intro.textContent = "지금 곡을 오선지로 본 모습입니다. 음표 세로 위치 = 음높이, 가로 = 시간(세로줄 = 마디). 읽기 전용.";
+  modalBody.appendChild(intro);
+
+  const scroll = document.createElement("div");
+  scroll.style.cssText = "overflow-x:auto; background:#fff; border:1px solid var(--line); border-radius:8px; padding:6px;";
+  scroll.innerHTML = svg;
+  modalBody.appendChild(scroll);
+
+  if (drumCount > 0) {
+    const note = document.createElement("p");
+    note.style.cssText = "font-size:12px; margin-top:10px;";
+    note.textContent = `※ 드럼 트랙 ${drumCount}개는 오선지 악보에 표시하지 않습니다(타악기는 표기 방식이 다름).`;
+    modalBody.appendChild(note);
+  }
+
+  const btnRow = document.createElement("div");
+  btnRow.className = "share-row";
+  btnRow.style.marginTop = "12px";
+  const png = document.createElement("button");
+  png.textContent = "📷 PNG로 저장";
+  png.addEventListener("click", () => scoreToPng(scroll.querySelector("svg")));
+  btnRow.appendChild(png);
+  modalBody.appendChild(btnRow);
+
+  modal.hidden = false;
+}
+
+// SVG 악보 → PNG (흰 바탕). 인쇄·공유용.
+function scoreToPng(svgEl) {
+  if (!svgEl) return;
+  const w = svgEl.width.baseVal.value, h = svgEl.height.baseVal.value;
+  const xml = new XMLSerializer().serializeToString(svgEl);
+  const src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(xml);
+  const img = new Image();
+  img.onload = () => {
+    const scale = 2;
+    const canvas = document.createElement("canvas");
+    canvas.width = w * scale; canvas.height = h * scale;
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.scale(scale, scale);
+    ctx.drawImage(img, 0, 0);
+    canvas.toBlob((b) => {
+      const s = activeSession();
+      const base = (s ? s.name : "score").replace(/[\\/:*?"<>|]+/g, "_").trim() || "score";
+      downloadBlob(b, base + "_악보.png");
+      showToast("악보 PNG 저장 완료 ✓");
+    }, "image/png");
+  };
+  img.onerror = () => showToast("PNG 변환 실패");
+  img.src = src;
 }
 
 // 링크(#song=...)로 들어왔으면 새 곡으로 가져온다
