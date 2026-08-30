@@ -141,7 +141,7 @@ function createVoices(track, out) {
     // 'Start time...'·RangeError + 파열음이 났다 → 미리 구운 버퍼를 매 타격마다 새 소스로 재생.
     const snareOut = new Tone.Filter(350, "highpass").connect(vol);   // 저역(폭발음) 제거 → 또렷한 스네어
     const hatOut = new Tone.Filter(7000, "highpass").connect(vol);    // 고역만 → 하이햇
-    const kickBuf = makeKickBuffer(dbToGain(-3));
+    const kickBuf = makeKickBuffer(dbToGain(5)); // 킥을 더 크게
     const snareBuf = makeNoiseBurst(0.16, 0.032, dbToGain(-6));       // 길이, 감쇠 시정수, 피크
     const hatBuf = makeNoiseBurst(0.06, 0.010, dbToGain(-13));
     const oneShot = (buf, dest, time) => {
