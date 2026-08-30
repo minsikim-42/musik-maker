@@ -393,6 +393,7 @@ function resizeAll() {
   }
   render();
   rebuildSequence();
+  updateTimeline(); // 마디 수가 바뀌면 타임라인 눈금도 갱신
   markDirty();
 }
 
@@ -656,12 +657,53 @@ function highlightColumn(col) {
     }
   }
   prevCol = col;
+  if (playing) { playheadStep = col; updateTimeline(); } // 재생 중엔 타임라인 핸들이 진행 위치를 따라간다
 }
 function clearHighlight() {
   for (const t of tracks)
     if (t.cellEls) t.cellEls.forEach((row) => row.forEach((el) => el.classList.remove("playing")));
   prevCol = -1;
 }
+
+// ── 재생 위치(플레이헤드) + 타임라인 ────────────────────────────
+let playheadStep = 0;   // '현재 시점' — 여기서 재생 시작. 재생 중엔 진행 위치를 따라 움직인다.
+let playing = false;
+const timelineEl = document.getElementById("timeline");
+const tlFill = document.getElementById("tlFill");
+const tlHandle = document.getElementById("tlHandle");
+const tlPos = document.getElementById("tlPos");
+
+function stepToPos(step) {
+  const bar = Math.floor(step / STEPS_PER_BAR) + 1;
+  const beat = Math.floor((step % STEPS_PER_BAR) / 4) + 1;
+  return `${bar}마디 ${beat}박`;
+}
+function updateTimeline() {
+  if (playheadStep > steps - 1) playheadStep = 0;
+  const pct = steps > 0 ? (playheadStep / steps) * 100 : 0;
+  tlHandle.style.left = pct + "%";
+  tlFill.style.width = pct + "%";
+  tlPos.textContent = stepToPos(playheadStep);
+}
+function setPlayhead(step) {
+  playheadStep = Math.max(0, Math.min(steps - 1, Math.round(step)));
+  updateTimeline();
+}
+function tlStepFromEvent(e) {
+  const rect = timelineEl.getBoundingClientRect();
+  return ((e.clientX - rect.left) / rect.width) * steps;
+}
+let tlDragging = false;
+timelineEl.addEventListener("pointerdown", (e) => {
+  if (playing) return;                 // 재생 중엔 핸들이 진행을 따라가므로 드래그 막음
+  tlDragging = true;
+  try { timelineEl.setPointerCapture(e.pointerId); } catch (err) {}
+  setPlayhead(tlStepFromEvent(e));
+});
+timelineEl.addEventListener("pointermove", (e) => { if (tlDragging) setPlayhead(tlStepFromEvent(e)); });
+const tlEnd = () => { tlDragging = false; };
+timelineEl.addEventListener("pointerup", tlEnd);
+timelineEl.addEventListener("pointercancel", tlEnd);
 
 // ══════════════════════════════════════════════════════════════
 //  세션 저장소 (곡 목록) — localStorage
@@ -722,6 +764,7 @@ function deserialize(data) {
   for (const td of data.tracks || []) tracks.push(makeTrackObj(td.type, td));
   render();
   rebuildSequence();
+  playheadStep = 0; playing = false; updateTimeline(); // 곡을 열면 재생 위치는 처음으로
   loading = false;
 }
 
@@ -915,18 +958,27 @@ function setBpm(v, opts = {}) {
   if (!opts.silent) markDirty();
 }
 
-document.getElementById("play").addEventListener("click", async () => {
+async function playFrom(fromStep) {
   await Tone.start();
   if (Tone.Transport.state === "started") return; // 이미 재생 중이면 무시(중복 시작 방지)
   Tone.Transport.bpm.value = Number(bpm.value);
   rebuildSequence();
+  const N = Math.max(0, Math.min(steps - 1, Math.round(fromStep)));
+  setPlayhead(N);
+  playing = true;
   seq.start("+0.06");                 // 첫 이벤트를 살짝 뒤로 → 시작 순간 '과거 시각' 스케줄 경고 방지
-  Tone.Transport.start("+0.05");
-});
+  // Transport를 시작 위치(N 16분음표)에서 켠다 → 그 스텝부터 재생
+  const pos = `${Math.floor(N / STEPS_PER_BAR)}:${Math.floor((N % STEPS_PER_BAR) / 4)}:${N % 4}`;
+  Tone.Transport.start("+0.05", pos);
+}
+document.getElementById("playStart").addEventListener("click", () => playFrom(0));       // 처음부터
+document.getElementById("playHere").addEventListener("click", () => playFrom(playheadStep)); // 현재 시점
 document.getElementById("stop").addEventListener("click", () => {
   Tone.Transport.stop();
   if (seq) seq.stop();
+  playing = false;
   clearHighlight();
+  updateTimeline(); // 멈춘 위치에 핸들 유지(현재 시점 재생이 이어받음)
 });
 bpm.addEventListener("input", () => setBpm(bpm.value));
 // 숫자 입력: 타이핑 중엔 필드를 건드리지 않고(범위 내면 반영), 확정(blur/Enter) 때 클램프

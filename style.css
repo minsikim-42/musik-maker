@@ -46,6 +46,49 @@ body {
   gap: 8px;
   margin-left: auto;           /* 오른쪽으로 밀기 */
 }
+
+/* ── 재생 위치 타임라인 ──────────────────── */
+#timelineWrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0 4px;
+}
+.tl-pos {
+  font-size: 12px;
+  color: var(--muted);
+  min-width: 84px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.timeline {
+  position: relative;
+  flex: 1;
+  height: 22px;
+  background: var(--panel2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  cursor: pointer;
+  touch-action: none;          /* 드래그를 우리가 처리 */
+  overflow: hidden;
+}
+.tl-fill {
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 0;
+  background: rgba(110, 168, 254, .22);
+  pointer-events: none;
+}
+.tl-handle {
+  position: absolute;
+  top: -2px; bottom: -2px;
+  width: 10px;
+  margin-left: -5px;
+  background: var(--accent);
+  border-radius: 3px;
+  box-shadow: 0 0 0 1px rgba(0,0,0,.35);
+  pointer-events: none;
+}
 #syncScroll.active {
   background: var(--accent);
   color: #0b1020;
