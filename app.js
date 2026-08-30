@@ -90,6 +90,25 @@ function realtimeMaster() {
   return masterNode;
 }
 
+const dbToGain = (db) => Math.pow(10, db / 20);
+// 엔벨로프(빠른 어택 + 지수 감쇠)를 입힌 노이즈 버스트 버퍼. 시작·끝이 0이라 클릭 없음.
+// 타격마다 이 버퍼로 새 ToneBufferSource를 만들어 폴리포닉하게 재생한다(드럼 파열음/충돌 방지).
+function makeNoiseBurst(seconds, tau, peak) {
+  const ctx = Tone.getContext().rawContext || Tone.getContext();
+  const sr = ctx.sampleRate;
+  const len = Math.max(1, Math.floor(seconds * sr));
+  const buf = ctx.createBuffer(1, len, sr);
+  const d = buf.getChannelData(0);
+  const atk = Math.max(1, Math.floor(0.001 * sr));
+  for (let i = 0; i < len; i++) {
+    const env = i < atk ? i / atk : Math.exp(-((i - atk) / sr) / tau);
+    d[i] = (Math.random() * 2 - 1) * env * peak;
+  }
+  const fade = Math.min(64, len); // 끝을 확실히 0으로
+  for (let k = 0; k < fade; k++) d[len - 1 - k] *= k / fade;
+  return buf;
+}
+
 // 트랙에 맞는 신스 노드를 만든다(현재 Tone 컨텍스트 기준). 저장/해제는 하지 않는다.
 // out = 최종 출력 노드(마스터 리미터). → 재생용(buildSynth)과 WAV 오프라인 렌더가 공유한다.
 function createVoices(track, out) {
@@ -99,17 +118,29 @@ function createVoices(track, out) {
 
   if (track.type === "drums") {
     const kick = new Tone.MembraneSynth().connect(vol);
-    const snare = new Tone.NoiseSynth({
-      noise: { type: "white" },
-      envelope: { attack: 0.001, decay: 0.15, sustain: 0 },
-    }).connect(vol);
-    const hatOut = new Tone.Filter(7000, "highpass").connect(vol);
-    const hat = new Tone.NoiseSynth({
-      noise: { type: "white" },
-      envelope: { attack: 0.001, decay: 0.03, sustain: 0 },
-    }).connect(hatOut);
-    kick.volume.value = -7; snare.volume.value = -11; hat.volume.value = -15; // 킥의 큰 순간 피크를 낮춰 겹칠 때 뭉개짐 방지
-    return { kind: "drums", kick, snare, hat, hatOut, vol };
+    kick.volume.value = -7;
+    // 스네어·하이햇: NoiseSynth는 노이즈 소스가 하나뿐(모노포닉)이라 자주 치면 소스 재시작이
+    // 충돌해 'Start time must be strictly greater' 에러 + 파열음이 난다. → 타격마다 새 원샷으로(폴리포닉).
+    // 엔벨로프를 입힌 노이즈 버퍼를 미리 굽고, 하이패스로 저역(폭발음)을 걷는다.
+    const snareOut = new Tone.Filter(350, "highpass").connect(vol);   // 저역 제거 → 또렷한 스네어
+    const hatOut = new Tone.Filter(7000, "highpass").connect(vol);    // 고역만 → 하이햇
+    const snareBuf = makeNoiseBurst(0.16, 0.032, dbToGain(-6));       // 길이, 감쇠 시정수, 피크
+    const hatBuf = makeNoiseBurst(0.06, 0.010, dbToGain(-13));
+    const oneShot = (buf, dest, time) => {
+      try {
+        const src = new Tone.ToneBufferSource(buf).connect(dest);
+        src.start(time == null ? undefined : time);
+        // dispose는 재생이 끝난 뒤 넉넉히 지나서(스케줄 처리와 겹치지 않게)
+        setTimeout(() => { try { src.dispose(); } catch (e) {} }, (buf.duration + 0.3) * 1000);
+      } catch (e) { /* 무시 */ }
+    };
+    const safeKick = (time) => { try { kick.triggerAttackRelease("C1", "8n", time); } catch (e) { /* 무시 */ } };
+    return {
+      kind: "drums", kick, snareOut, hatOut, vol,
+      hitKick: safeKick,
+      hitSnare: (time) => oneShot(snareBuf, snareOut, time),
+      hitHat: (time) => oneShot(hatBuf, hatOut, time),
+    };
   }
 
   // 커스텀 소리(라이브러리 참조)
@@ -209,7 +240,7 @@ function applySoundToTracks(sound) {
 
 function disposeSynth(s) {
   if (!s) return;
-  if (s.kind === "drums") { s.kick.dispose(); s.snare.dispose(); s.hat.dispose(); s.hatOut.dispose(); }
+  if (s.kind === "drums") { s.kick.dispose(); s.snareOut.dispose(); s.hatOut.dispose(); }
   else { s.poly.dispose(); if (s.filt) s.filt.dispose(); }
   if (s.vol) s.vol.dispose();
 }
@@ -227,9 +258,9 @@ function triggerTrack(track, col, time) {
     for (let r = 0; r < rows.length; r++) {
       if (!track.grid[r][col]) continue;
       const s = track.synth;
-      if (rows[r] === "킥") s.kick.triggerAttackRelease("C1", "8n", time);
-      else if (rows[r] === "스네어") s.snare.triggerAttackRelease("16n", time);
-      else s.hat.triggerAttackRelease("32n", time);
+      if (rows[r] === "킥") s.hitKick(time);
+      else if (rows[r] === "스네어") s.hitSnare(time);
+      else s.hitHat(time);
     }
   } else {
     const notesOn = [];
@@ -243,9 +274,9 @@ function preview(track, r) {
   const rows = track.type === "drums" ? DRUM_ROWS : MELODY_NOTES;
   if (track.type === "drums") {
     const s = track.synth;
-    if (rows[r] === "킥") s.kick.triggerAttackRelease("C1", "8n");
-    else if (rows[r] === "스네어") s.snare.triggerAttackRelease("16n");
-    else s.hat.triggerAttackRelease("32n");
+    if (rows[r] === "킥") s.hitKick();
+    else if (rows[r] === "스네어") s.hitSnare();
+    else s.hitHat();
   } else {
     track.synth.poly.triggerAttackRelease(rows[r], "16n");
   }
@@ -846,6 +877,7 @@ function setBpm(v, opts = {}) {
 
 document.getElementById("play").addEventListener("click", async () => {
   await Tone.start();
+  if (Tone.Transport.state === "started") return; // 이미 재생 중이면 무시(중복 시작 방지)
   Tone.Transport.bpm.value = Number(bpm.value);
   rebuildSequence();
   seq.start(0);
@@ -1509,9 +1541,9 @@ function scheduleTrackOffline(track, voices, secondsPerStep) {
     if (track.type === "drums") {
       for (let r = 0; r < rows.length; r++) {
         if (!track.grid[r][c]) continue;
-        if (rows[r] === "킥") voices.kick.triggerAttackRelease("C1", 2 * secondsPerStep, time);
-        else if (rows[r] === "스네어") voices.snare.triggerAttackRelease(secondsPerStep, time);
-        else voices.hat.triggerAttackRelease(secondsPerStep / 2, time);
+        if (rows[r] === "킥") voices.hitKick(time);
+        else if (rows[r] === "스네어") voices.hitSnare(time);
+        else voices.hitHat(time);
       }
     } else {
       const notes = [];
