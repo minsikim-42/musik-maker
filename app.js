@@ -898,8 +898,8 @@ document.getElementById("play").addEventListener("click", async () => {
   if (Tone.Transport.state === "started") return; // 이미 재생 중이면 무시(중복 시작 방지)
   Tone.Transport.bpm.value = Number(bpm.value);
   rebuildSequence();
-  seq.start(0);
-  Tone.Transport.start();
+  seq.start("+0.06");                 // 첫 이벤트를 살짝 뒤로 → 시작 순간 '과거 시각' 스케줄 경고 방지
+  Tone.Transport.start("+0.05");
 });
 document.getElementById("stop").addEventListener("click", () => {
   Tone.Transport.stop();
