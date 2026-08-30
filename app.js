@@ -64,22 +64,23 @@ function loadSampleBuffer(sound) {
 // ══════════════════════════════════════════════════════════════
 //  악기(신스)
 // ══════════════════════════════════════════════════════════════
-// 마스터 소프트 클리퍼: 천장(±1)을 부드럽게 포화시켜 클리핑을 막는다.
-// Web Audio엔 진짜 리미터가 없어 컴프레서는 순간 피크를 놓친다 → WaveShaper로 확실히 눌러준다.
-// 0.7 이하는 그대로(원음 보존), 그 위는 tanh로 완만히 굽혀 입력이 아무리 커도 ~0.93에서 멈춘다.
-function softclip(x) {
-  const t = 0.7, a = Math.abs(x), s = Math.sign(x);
-  return a <= t ? x : s * (t + (1 - t) * Math.tanh((a - t) / (1 - t)));
+// 마스터: 여러 트랙이 겹쳐도 깨끗하게. 두 가지가 핵심이다.
+//  1) 헤드룸(TRIM -6dB): 정상 믹스(2~4트랙)가 천장(0.9) 아래에 머물러 마스터가 손대지 않음(왜곡 0).
+//  2) 넓은 범위 소프트 클립: 무거운 믹스가 넘쳐도 tanh로 부드럽게 포화(하드클리핑 없음).
+//     WaveShaper는 입력이 ±1을 넘으면 곡선 끝값에 '평평하게 잘라'(=퍼벅) 버리므로,
+//     입력을 1/DRIVE로 축소해 넣고 곡선이 실제로는 ±DRIVE까지 다루게 설계한다.
+const MASTER_TRIM = 0.5;  // -6dB 헤드룸
+const MASTER_DRIVE = 6;   // 소프트 클립이 다루는 입력 범위(±6까지 매끄럽게)
+function softShape(s) {    // 0.9 이하는 그대로, 그 위는 tanh로 완만히 굽혀 ~1.0에서 멈춘다
+  const t = 0.9, a = Math.abs(s), sg = Math.sign(s);
+  return a <= t ? s : sg * (t + (1 - t) * Math.tanh((a - t) / (1 - t)));
 }
-// 마스터 체인: [입력 게인(헤드룸)] → [소프트 클리퍼] → 출력.
-// 게인으로 미리 낮춰(headroom) 여러 트랙이 겹쳐도 클리퍼가 상시 세게 물리지 않게 한다
-// → 킥의 순간 피크가 뭉개지며 나던 '퍼벅' 소리를 막는다. 트랙은 이 게인 입력에 붙는다.
 function makeMaster() {
-  const ws = new Tone.WaveShaper(softclip, 2048);
-  ws.oversample = "4x"; // 비선형에서 생기는 앨리어싱 완화(2x→4x)
+  const ws = new Tone.WaveShaper((x) => softShape(x * MASTER_DRIVE), 4096);
+  ws.oversample = "2x";
   ws.toDestination();
-  const trim = new Tone.Gain(0.5).connect(ws); // -6dB 헤드룸
-  return trim;
+  // pre 게인 = TRIM/DRIVE → 출력 = softShape(TRIM * 신호). 트랙은 이 게인 입력에 붙는다.
+  return new Tone.Gain(MASTER_TRIM / MASTER_DRIVE).connect(ws);
 }
 
 // 재생용 마스터: 모든 트랙이 이 소프트 클리퍼를 거쳐 출력된다.

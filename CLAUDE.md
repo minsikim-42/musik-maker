@@ -64,7 +64,7 @@ localStorage 상태나 공유 코덱 round-trip은 `javascript_tool`로 `localSt
 |---|---|---|
 | 악기(신스) | `createVoices` `buildSynth` `defaultParams` `applyParamsLive` `disposeSynth` `triggerTrack` `preview` | 트랙 종류/악기에 맞는 Tone 신스 생성·해제, 한 스텝 울리기. `createVoices`는 노드만 만들고(저장/해제 안 함) 재생·WAV 렌더 양쪽에서 재사용 |
 | WAV 내보내기 | `exportWav` `scheduleTrackOffline` `audioBufferToWav` `downloadBlob` | `Tone.Offline`로 곡을 한 번에 렌더 → 16비트 PCM WAV로 인코딩 → 다운로드 |
-| 마스터 | `softclip` `makeMaster` `realtimeMaster` | 마스터 체인: 입력 게인(-6dB 헤드룸) → 소프트 클리퍼(WaveShaper). 겹쳐도 클리퍼가 상시 세게 안 물리게 미리 낮춘다(안 그러면 킥 피크가 뭉개져 '퍼벅') |
+| 마스터 | `softShape` `makeMaster` `realtimeMaster` | 헤드룸(-6dB, `MASTER_TRIM`) + 넓은범위 소프트클립. WaveShaper는 입력 ±1 초과를 곡선 끝에 '평평하게 잘라'(=퍼벅) 버리므로 입력을 1/`MASTER_DRIVE`로 축소해 넣고 곡선이 ±DRIVE까지 다루게 함 → 겹쳐도 하드클리핑 없음. 천장 0.9라 정상 믹스는 투명 |
 | 오선지 악보 | `buildScoreSVG` `openScoreModal` `noteToStaff` `scoreToPng` | 격자를 5선 악보(SVG)로 그려 보여주고 PNG로 저장(멜로디 트랙만) |
 | 트랙 | `makeTrackObj` `addTrack` `removeTrack` `resizeAll` `clearTracks` | 트랙 객체 생성/추가/삭제, 곡 길이 변경 시 격자 리사이즈. **트랙은 "＋ 트랙 추가"로 하나 만들고, 사운드(악기·드럼)는 트랙 헤더의 드롭다운에서 고른다** |
 | 화면 그리기 | `render` `renderTrack` | 트랙들을 DOM으로 그림(격자 셀·헤더 컨트롤). 구조 변경 때 전체 재그림 |
