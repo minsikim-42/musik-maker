@@ -71,7 +71,7 @@ git add -A && git commit -m "..." && git push
 | 드럼 | `makeNoiseBurst` `makeKickBuffer` (+ createVoices drums 분기) | 킥·스네어·하이햇 **셋 다 타격마다 새 `ToneBufferSource` 원샷(폴리포닉)** — 미리 구운 버퍼 재생 |
 | 트랙 만들기/추가 | `makeTrackObj` `addTrack` `removeTrack` `moveTrack` `startTrackRename` `resizeAll` `clearTracks` | 트랙 생성/추가/삭제/순서이동/이름변경, 곡 길이 변경 시 격자 리사이즈 |
 | 화면 그리기 | `render` `renderTrack` `enableDragScroll` | 트랙들을 DOM으로. 헤더(접기·이름·순서·사운드·음색·볼륨·음소거·삭제) + 격자 |
-| 재생 | `playFrom` `rebuildSequence` `highlightColumn` `clearHighlight` `updateTimeline` `setPlayhead` | `Tone.Transport`+`Tone.Sequence`로 스텝을 돌며 모든 트랙 동시 울림. **재생 버튼 둘**: ⏮ 처음(`playFrom(0)`)·▶ 현재(`playFrom(playheadStep)`). 상단 **타임라인 바**(`#timeline`)의 핸들을 드래그해 시작 위치 지정, 재생 중엔 `highlightColumn`이 핸들을 진행 위치로 옮김. `playFrom`은 `Tone.Transport.start(time, 시작위치)`로 그 스텝부터 켠다 |
+| 재생 | `playFrom` `rebuildSequence` `highlightColumn` `updateTimeline` `setPlayhead` `markPlayheadColumn` | `Tone.Transport`+`Tone.Sequence`로 스텝을 돌며 모든 트랙 동시 울림. **재생 버튼 둘**: ⏮ 처음(`playFrom(0)`)·▶ 현재(`playFrom(playheadStep)`). **상단바+타임라인은 `.topsticky`로 함께 고정**. 타임라인(`#timeline`) 핸들을 드래그해 시작 위치 지정, 재생 중엔 `highlightColumn`이 핸들을 진행 위치로 옮김. **핸들 위치 열은 `.playhead-col`(노란색)** 로 모든 트랙에 표시(`markPlayheadColumn`, 정지·재생 모두). `playFrom`은 `Tone.Transport.start(time, 시작위치)`로 그 스텝부터 켠다 |
 | 세션 저장소 | `serialize` `deserialize` `newSong` `openSession` `saveActive` `markDirty` `flushSave` `deleteSession` `renameSession` `renderSessionList` | 곡=세션을 localStorage에 자동 저장, 왼쪽 목록에서 전환 |
 | 컨트롤 배선 | `setBpm` `changeBars` `syncTracksHorizontally` (+익명) | 재생/정지/템포(슬라이더+숫자입력)/트랙추가/공유/🔒트랙고정. **곡 길이(마디)는 각 트랙 격자 오른쪽 끝의 ＋/－ 세로 버튼**(`changeBars`, 상한 없음·최소 1) |
 | 드로어 + 메뉴 | `MENU` `openDrawer` `showToast` | 왼쪽 "내 곡" 목록 + 기능 메뉴(신디사이저·공유·WAV·오선지) |

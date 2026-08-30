@@ -7,7 +7,7 @@
   <!-- 소리 엔진: Tone.js (Web Audio API 위에서 악기·타이밍·재생을 다룸) -->
   <script src="https://unpkg.com/tone@14.8.49/build/Tone.js"></script>
   <!-- ?v= 는 배포마다 올린다: 브라우저·GitHub Pages 캐시로 옛 버전이 남는 것을 막는다 -->
-  <link rel="stylesheet" href="style.css?v=36" />
+  <link rel="stylesheet" href="style.css?v=37" />
 </head>
 <body>
   <!-- 왼쪽에서 밀려나오는 세션(내 곡) 목록 + 메뉴 -->
@@ -25,29 +25,32 @@
   </div>
   <div id="scrim" class="scrim" hidden></div>
 
-  <header class="topbar">
-    <button id="hamburger" class="icon-btn" aria-label="메뉴 열기">
-      <span></span><span></span><span></span>
-    </button>
-    <div class="brand">
-      <h1>music-maker</h1>
-      <p class="sub">현재 곡: <span id="songName">—</span></p>
-    </div>
-    <!-- 항상 위에 고정되는 재생 조작 -->
-    <div class="transport">
-      <button id="playStart" class="primary" title="처음(맨 앞)부터 재생">⏮ 처음</button>
-      <button id="playHere" title="타임라인 핸들 위치에서 재생">▶ 현재</button>
-      <button id="stop">⏹ 정지</button>
-      <button id="syncScroll" title="켜면 가로로 이동할 때 모든 트랙이 같이 움직입니다">🔒 트랙 고정</button>
-    </div>
-  </header>
+  <!-- 상단바 + 타임라인을 함께 위에 고정 -->
+  <div class="topsticky">
+    <header class="topbar">
+      <button id="hamburger" class="icon-btn" aria-label="메뉴 열기">
+        <span></span><span></span><span></span>
+      </button>
+      <div class="brand">
+        <h1>music-maker</h1>
+        <p class="sub">현재 곡: <span id="songName">—</span></p>
+      </div>
+      <!-- 항상 위에 고정되는 재생 조작 -->
+      <div class="transport">
+        <button id="playStart" class="primary" title="처음(맨 앞)부터 재생">⏮ 처음</button>
+        <button id="playHere" title="타임라인 핸들 위치에서 재생">▶ 현재</button>
+        <button id="stop">⏹ 정지</button>
+        <button id="syncScroll" title="켜면 가로로 이동할 때 모든 트랙이 같이 움직입니다">🔒 트랙 고정</button>
+      </div>
+    </header>
 
-  <!-- 재생 위치 타임라인: 핸들을 드래그해 '현재 시점'을 정하고, 재생 중엔 진행 위치를 따라 움직인다 -->
-  <div id="timelineWrap">
-    <span id="tlPos" class="tl-pos">1마디 1박</span>
-    <div id="timeline" class="timeline">
-      <div id="tlFill" class="tl-fill"></div>
-      <div id="tlHandle" class="tl-handle"></div>
+    <!-- 재생 위치 타임라인: 핸들을 드래그해 '현재 시점'을 정하고, 재생 중엔 진행 위치를 따라 움직인다 -->
+    <div id="timelineWrap">
+      <span id="tlPos" class="tl-pos">1마디 1박</span>
+      <div id="timeline" class="timeline">
+        <div id="tlFill" class="tl-fill"></div>
+        <div id="tlHandle" class="tl-handle"></div>
+      </div>
     </div>
   </div>
 
@@ -83,6 +86,6 @@
     </div>
   </div>
 
-  <script src="app.js?v=36"></script>
+  <script src="app.js?v=37"></script>
 </body>
 </html>

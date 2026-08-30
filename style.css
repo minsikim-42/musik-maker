@@ -26,19 +26,22 @@ body {
   padding: 0 20px 24px;
 }
 
-/* ── 상단바 (항상 위에 고정) ─────────────── */
-.topbar {
+/* ── 상단바 + 타임라인 (함께 위에 고정) ───── */
+.topsticky {
   position: sticky;
   top: 0;
   z-index: 15;                 /* 트랙 위, 드로어/스크림(20,30) 아래 */
+  margin: 0 -20px;             /* body의 좌우 여백을 상쇄해 배경이 화면 끝까지 */
+  padding: 0 20px 6px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--line);
+}
+.topbar {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 10px 14px;
-  padding: 12px 20px;
-  margin: 0 -20px;             /* body의 좌우 여백을 상쇄해 배경이 화면 끝까지 */
-  background: var(--bg);
-  border-bottom: 1px solid var(--line);
+  padding: 12px 0 0;
 }
 .transport {
   display: flex;
@@ -52,7 +55,7 @@ body {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 8px 0 4px;
+  padding: 8px 0 0;
 }
 .tl-pos {
   font-size: 12px;
@@ -404,6 +407,12 @@ button.primary { background: var(--accent); color: #0b1020; font-weight: 600; bo
 .cell.on { background: var(--on); }
 .cell.on.drum { background: var(--on-drum); }
 .cell.playing { outline: 2px solid var(--playhead); outline-offset: -2px; }
+/* 핸들(현재 시점) 위치 열 — 노란색 세로 표시(정지·재생 모두) */
+.cell.playhead-col {
+  box-shadow: inset 0 0 0 2px var(--playhead);
+  background: rgba(255, 209, 102, .16);
+}
+.cell.on.playhead-col { box-shadow: inset 0 0 0 2px var(--playhead); } /* 켜진 칸은 색 유지 + 노란 테두리 */
 
 footer { margin-top: 14px; color: var(--muted); font-size: 12px; }
 

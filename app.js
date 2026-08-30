@@ -411,6 +411,8 @@ const tracksEl = document.getElementById("tracks");
 function render() {
   tracksEl.innerHTML = "";
   for (const track of tracks) tracksEl.appendChild(renderTrack(track));
+  prevPlayheadCol = -1;         // 셀이 새로 그려졌으니 노란 열 다시 칠한다
+  if (typeof markPlayheadColumn === "function") markPlayheadColumn();
 }
 
 function renderTrack(track) {
@@ -633,7 +635,6 @@ function enableDragScroll(scrollEl, flagEl) {
 //  재생
 // ══════════════════════════════════════════════════════════════
 let seq = null;
-let prevCol = -1;
 
 function rebuildSequence() {
   if (seq) { seq.dispose(); seq = null; }
@@ -648,21 +649,10 @@ function rebuildSequence() {
   if (Tone.Transport.state === "started") seq.start(0);
 }
 
+// 재생 중 매 스텝(Tone.Draw로 화면 타이밍에 맞춰) 호출 — 현재 위치를 플레이헤드로 옮긴다.
 function highlightColumn(col) {
-  for (const t of tracks) {
-    if (!t.cellEls) continue;
-    for (let r = 0; r < t.cellEls.length; r++) {
-      if (prevCol >= 0 && t.cellEls[r][prevCol]) t.cellEls[r][prevCol].classList.remove("playing");
-      if (t.cellEls[r][col]) t.cellEls[r][col].classList.add("playing");
-    }
-  }
-  prevCol = col;
-  if (playing) { playheadStep = col; updateTimeline(); } // 재생 중엔 타임라인 핸들이 진행 위치를 따라간다
-}
-function clearHighlight() {
-  for (const t of tracks)
-    if (t.cellEls) t.cellEls.forEach((row) => row.forEach((el) => el.classList.remove("playing")));
-  prevCol = -1;
+  playheadStep = col;
+  updateTimeline(); // 핸들 이동 + 노란 열 표시
 }
 
 // ── 재생 위치(플레이헤드) + 타임라인 ────────────────────────────
@@ -678,12 +668,26 @@ function stepToPos(step) {
   const beat = Math.floor((step % STEPS_PER_BAR) / 4) + 1;
   return `${bar}마디 ${beat}박`;
 }
+let prevPlayheadCol = -1;
+// 핸들 위치 열을 노란색으로(정지·재생 모두). 바뀐 두 열만 갱신.
+function markPlayheadColumn() {
+  const col = playheadStep;
+  for (const t of tracks) {
+    if (!t.cellEls) continue;
+    for (let r = 0; r < t.cellEls.length; r++) {
+      if (prevPlayheadCol >= 0 && t.cellEls[r][prevPlayheadCol]) t.cellEls[r][prevPlayheadCol].classList.remove("playhead-col");
+      if (t.cellEls[r][col]) t.cellEls[r][col].classList.add("playhead-col");
+    }
+  }
+  prevPlayheadCol = col;
+}
 function updateTimeline() {
   if (playheadStep > steps - 1) playheadStep = 0;
   const pct = steps > 0 ? (playheadStep / steps) * 100 : 0;
   tlHandle.style.left = pct + "%";
   tlFill.style.width = pct + "%";
   tlPos.textContent = stepToPos(playheadStep);
+  markPlayheadColumn();
 }
 function setPlayhead(step) {
   playheadStep = Math.max(0, Math.min(steps - 1, Math.round(step)));
@@ -977,8 +981,7 @@ document.getElementById("stop").addEventListener("click", () => {
   Tone.Transport.stop();
   if (seq) seq.stop();
   playing = false;
-  clearHighlight();
-  updateTimeline(); // 멈춘 위치에 핸들 유지(현재 시점 재생이 이어받음)
+  updateTimeline(); // 멈춘 위치에 핸들·노란 열 유지(현재 시점 재생이 이어받음)
 });
 bpm.addEventListener("input", () => setBpm(bpm.value));
 // 숫자 입력: 타이핑 중엔 필드를 건드리지 않고(범위 내면 반영), 확정(blur/Enter) 때 클램프
