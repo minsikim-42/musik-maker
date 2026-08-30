@@ -305,11 +305,39 @@ button.primary { background: var(--accent); color: #0b1020; font-weight: 600; bo
   overscroll-behavior: contain;
   touch-action: pan-x pan-y;      /* 가로·세로 둘 다 드래그로 스크롤 */
   padding-bottom: 2px;
+  display: flex;                  /* 격자 + 오른쪽 마디 조절 버튼을 가로로 */
+  align-items: flex-start;
 }
 .gridscroll.tall { max-height: 344px; }  /* 멜로디: 약 13줄만 보이고 세로 스크롤 */
 .grid.in-scroller {               /* 스크롤은 바깥 컨테이너가 맡으므로 격자는 넘치게 둔다 */
   overflow: visible;
   max-height: none;
+  flex: 0 0 auto;                 /* 내용 크기 유지(줄어들지 않게) */
+}
+/* 격자 오른쪽 끝: 곡 길이 ＋/－ (세로). 위에 고정돼 세로 스크롤해도 보인다 */
+.bar-ctl {
+  flex: 0 0 auto;
+  position: sticky;
+  top: 2px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  margin-left: 8px;
+  padding: 2px;
+}
+.bar-ctl button {
+  width: 34px;
+  height: 30px;
+  padding: 0;
+  font-size: 16px;
+  line-height: 1;
+}
+.bar-ctl button:disabled { opacity: .3; cursor: default; }
+.bar-ctl-label {
+  font-size: 10px;
+  color: var(--muted);
+  white-space: nowrap;
 }
 .label-cell {
   color: var(--muted);

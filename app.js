@@ -564,10 +564,25 @@ function renderTrack(track) {
     }
   });
 
+  // 격자 오른쪽 끝: 곡 길이(마디) ＋/－. 오른쪽으로 스크롤하면 나온다. 위에 고정(sticky)돼 세로로 스크롤해도 보임.
+  const barCtl = document.createElement("div");
+  barCtl.className = "bar-ctl";
+  const barPlus = document.createElement("button");
+  barPlus.textContent = "＋"; barPlus.title = "1마디 늘리기";
+  barPlus.addEventListener("click", () => changeBars(1));
+  const barLabel = document.createElement("span");
+  barLabel.className = "bar-ctl-label";
+  barLabel.textContent = bars + "마디";
+  const barMinus = document.createElement("button");
+  barMinus.textContent = "－"; barMinus.title = "1마디 줄이기"; barMinus.disabled = bars <= 1;
+  barMinus.addEventListener("click", () => changeBars(-1));
+  barCtl.append(barPlus, barLabel, barMinus);
+
   // 가로·세로를 한 컨테이너에서 스크롤(양축 touch-action 허용). 멜로디는 tall(세로 스크롤).
   const box = document.createElement("div");
   box.className = "gridscroll" + (track.type === "melody" ? " tall" : "");
   box.appendChild(grid);
+  box.appendChild(barCtl); // 격자 오른쪽에 이어 붙음(flex row)
   track._hscroll = box; // '트랙 고정' 가로 동기화 대상(같은 요소가 세로도 스크롤)
   box.addEventListener("scroll", () => {
     track._scrollTop = box.scrollTop;
@@ -702,7 +717,6 @@ function deserialize(data) {
 
   bars = data.bars || 2;
   steps = bars * STEPS_PER_BAR;
-  barsSel.value = String(bars);
   setBpm(data.bpm || 120, { silent: true }); // 곡 로드 시 템포 반영(저장 유발 안 함)
 
   for (const td of data.tracks || []) tracks.push(makeTrackObj(td.type, td));
@@ -881,8 +895,16 @@ function escapeHtml(str) {
 // ══════════════════════════════════════════════════════════════
 const bpm = document.getElementById("bpm");
 const bpmNum = document.getElementById("bpmNum");
-const barsSel = document.getElementById("bars");
 const songNameEl = document.getElementById("songName");
+
+// 곡 길이(마디) 조절 — 트랙 격자 오른쪽 끝 ＋/－ 버튼이 부른다. 상한 없음, 최소 1마디.
+function changeBars(delta) {
+  const next = bars + delta;
+  if (next < 1) return;
+  bars = next;
+  for (const t of tracks) t._scrollLeft = 1e9; // 조절 후에도 오른쪽 끝(버튼)이 보이게
+  resizeAll();
+}
 
 // 템포 설정: 슬라이더·숫자입력을 함께 맞추고 Transport에 반영(40~220 클램프)
 function setBpm(v, opts = {}) {
@@ -913,7 +935,6 @@ bpmNum.addEventListener("input", () => {
   if (n >= 40 && n <= 220) setBpm(n, { keepNum: true });
 });
 bpmNum.addEventListener("change", () => setBpm(bpmNum.value));
-barsSel.addEventListener("change", (e) => { bars = Number(e.target.value); resizeAll(); });
 // 트랙 추가: 일단 만들고, 사운드(악기·드럼)는 트랙에서 고른다
 document.getElementById("addTrack").addEventListener("click", () => addTrack("melody"));
 document.getElementById("newSong").addEventListener("click", () => newSong(true));

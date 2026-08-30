@@ -73,7 +73,7 @@ git add -A && git commit -m "..." && git push
 | 화면 그리기 | `render` `renderTrack` `enableDragScroll` | 트랙들을 DOM으로. 헤더(접기·이름·순서·사운드·음색·볼륨·음소거·삭제) + 격자 |
 | 재생 | `rebuildSequence` `highlightColumn` `clearHighlight` | `Tone.Transport`+`Tone.Sequence`로 스텝을 돌며 모든 트랙 동시 울림 |
 | 세션 저장소 | `serialize` `deserialize` `newSong` `openSession` `saveActive` `markDirty` `flushSave` `deleteSession` `renameSession` `renderSessionList` | 곡=세션을 localStorage에 자동 저장, 왼쪽 목록에서 전환 |
-| 컨트롤 배선 | `setBpm` `syncTracksHorizontally` (+익명) | 재생/정지/템포(슬라이더+숫자입력)/곡길이/트랙추가/공유/🔒트랙고정 |
+| 컨트롤 배선 | `setBpm` `changeBars` `syncTracksHorizontally` (+익명) | 재생/정지/템포(슬라이더+숫자입력)/트랙추가/공유/🔒트랙고정. **곡 길이(마디)는 각 트랙 격자 오른쪽 끝의 ＋/－ 세로 버튼**(`changeBars`, 상한 없음·최소 1) |
 | 드로어 + 메뉴 | `MENU` `openDrawer` `showToast` | 왼쪽 "내 곡" 목록 + 기능 메뉴(신디사이저·공유·WAV·오선지) |
 | 링크 공유 | `encodeShare` `decodeShare` `openShareModal` `importFromHash` | 곡을 URL에 담고/풀고 |
 | 신디사이저 | `openSoundManager` `openSoundEditor` `openSampleEditor` `onSampleFile` `playSoundPreview` `playSamplePreview` | 소리(프리셋/샘플) 만들기·편집·삭제 |
