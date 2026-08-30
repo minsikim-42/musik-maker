@@ -129,9 +129,10 @@ function createVoices(track, out) {
     const oneShot = (buf, dest, time) => {
       try {
         const src = new Tone.ToneBufferSource(buf).connect(dest);
-        src.start(time == null ? undefined : time);
-        // dispose는 재생이 끝난 뒤 넉넉히 지나서(스케줄 처리와 겹치지 않게)
-        setTimeout(() => { try { src.dispose(); } catch (e) {} }, (buf.duration + 0.3) * 1000);
+        const t = (time == null) ? Tone.now() : Math.max(0, time);
+        src.start(t);
+        src.stop(t + buf.duration + 0.02); // 명시적 정지로 내부 자동정지 계산(미세 음수) 회피
+        setTimeout(() => { try { src.dispose(); } catch (e) {} }, (buf.duration + 0.4) * 1000);
       } catch (e) { /* 무시 */ }
     };
     const safeKick = (time) => { try { kick.triggerAttackRelease("C1", "8n", time); } catch (e) { /* 무시 */ } };
