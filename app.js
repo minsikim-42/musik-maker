@@ -108,6 +108,25 @@ function makeNoiseBurst(seconds, tau, peak) {
   for (let k = 0; k < fade; k++) d[len - 1 - k] *= k / fade;
   return buf;
 }
+// 킥 버퍼: 사인이 고→저로 떨어지는 스윕 + 지수 감쇠(MembraneSynth를 폴리포닉 원샷으로 대체)
+function makeKickBuffer(peak) {
+  const ctx = Tone.getContext().rawContext || Tone.getContext();
+  const sr = ctx.sampleRate;
+  const len = Math.floor(0.34 * sr);
+  const buf = ctx.createBuffer(1, len, sr);
+  const d = buf.getChannelData(0);
+  const f0 = 150, f1 = 50, pitchTau = 0.03, ampTau = 0.11;
+  let phase = 0;
+  for (let i = 0; i < len; i++) {
+    const t = i / sr;
+    const f = f1 + (f0 - f1) * Math.exp(-t / pitchTau);
+    phase += (2 * Math.PI * f) / sr;
+    d[i] = Math.sin(phase) * Math.exp(-t / ampTau) * peak;
+  }
+  const fade = Math.min(128, len);
+  for (let k = 0; k < fade; k++) d[len - 1 - k] *= k / fade;
+  return buf;
+}
 
 // 트랙에 맞는 신스 노드를 만든다(현재 Tone 컨텍스트 기준). 저장/해제는 하지 않는다.
 // out = 최종 출력 노드(마스터 리미터). → 재생용(buildSynth)과 WAV 오프라인 렌더가 공유한다.
@@ -117,13 +136,12 @@ function createVoices(track, out) {
   const vol = new Tone.Volume(track.volume ?? 0).connect(out);
 
   if (track.type === "drums") {
-    const kick = new Tone.MembraneSynth().connect(vol);
-    kick.volume.value = -7;
-    // 스네어·하이햇: NoiseSynth는 노이즈 소스가 하나뿐(모노포닉)이라 자주 치면 소스 재시작이
-    // 충돌해 'Start time must be strictly greater' 에러 + 파열음이 난다. → 타격마다 새 원샷으로(폴리포닉).
-    // 엔벨로프를 입힌 노이즈 버퍼를 미리 굽고, 하이패스로 저역(폭발음)을 걷는다.
-    const snareOut = new Tone.Filter(350, "highpass").connect(vol);   // 저역 제거 → 또렷한 스네어
+    // 세 드럼 모두 '타격마다 새 원샷(폴리포닉)'으로 재생한다.
+    // 모노포닉 신스(NoiseSynth·MembraneSynth)를 자주 치면 소스/자동화 재시작이 충돌해
+    // 'Start time...'·RangeError + 파열음이 났다 → 미리 구운 버퍼를 매 타격마다 새 소스로 재생.
+    const snareOut = new Tone.Filter(350, "highpass").connect(vol);   // 저역(폭발음) 제거 → 또렷한 스네어
     const hatOut = new Tone.Filter(7000, "highpass").connect(vol);    // 고역만 → 하이햇
+    const kickBuf = makeKickBuffer(dbToGain(-3));
     const snareBuf = makeNoiseBurst(0.16, 0.032, dbToGain(-6));       // 길이, 감쇠 시정수, 피크
     const hatBuf = makeNoiseBurst(0.06, 0.010, dbToGain(-13));
     const oneShot = (buf, dest, time) => {
@@ -135,10 +153,9 @@ function createVoices(track, out) {
         setTimeout(() => { try { src.dispose(); } catch (e) {} }, (buf.duration + 0.4) * 1000);
       } catch (e) { /* 무시 */ }
     };
-    const safeKick = (time) => { try { kick.triggerAttackRelease("C1", "8n", time); } catch (e) { /* 무시 */ } };
     return {
-      kind: "drums", kick, snareOut, hatOut, vol,
-      hitKick: safeKick,
+      kind: "drums", snareOut, hatOut, vol,
+      hitKick: (time) => oneShot(kickBuf, vol, time),
       hitSnare: (time) => oneShot(snareBuf, snareOut, time),
       hitHat: (time) => oneShot(hatBuf, hatOut, time),
     };
@@ -241,7 +258,7 @@ function applySoundToTracks(sound) {
 
 function disposeSynth(s) {
   if (!s) return;
-  if (s.kind === "drums") { s.kick.dispose(); s.snareOut.dispose(); s.hatOut.dispose(); }
+  if (s.kind === "drums") { s.snareOut.dispose(); s.hatOut.dispose(); }
   else { s.poly.dispose(); if (s.filt) s.filt.dispose(); }
   if (s.vol) s.vol.dispose();
 }
