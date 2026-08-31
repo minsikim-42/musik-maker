@@ -1,6 +1,6 @@
 // music-maker — 3단계: 곡을 "세션"처럼 저장/전환 (왼쪽 드로어 = 내 곡 목록)
-// 세션 = 곡 하나(트랙·악기·격자·템포·마디). 브라우저 localStorage에 자동 저장된다.
-// 목록에서 곡을 누르면 그 곡이 열리고, 편집하면 활성 곡에 자동 저장된다.
+// 세션 = 곡 하나(트랙·악기·격자·템포·마디). 브라우저 localStorage에 저장된다.
+// 목록에서 곡을 누르면 그 곡이 열린다. 저장은 '저장' 버튼을 누를 때만 한다(자동 저장 없음).
 
 // ── 음/드럼 줄 정의 ─────────────────────────────────────────────
 // 멜로디 음역: C6(맨 위) ~ C3(맨 아래). 격자는 이 중 일부만 보여주고 세로 스크롤한다.
@@ -785,8 +785,8 @@ const LS_ACTIVE = "music-maker.activeId";
 
 let sessions = [];   // [{ id, name, updatedAt, data }]
 let activeId = null;
-let loading = false;   // 곡을 불러오는 동안 자동 저장이 끼어들지 않게
-let hasLoaded = false; // 첫 곡을 아직 안 열었으면 flushSave가 빈 편집기를 저장하지 않게
+let loading = false;   // 곡을 불러오는 동안 markDirty가 끼어들지 않게(불러오기는 '변경'이 아님)
+let hasLoaded = false; // 첫 곡을 아직 안 열었으면 이탈 가드가 빈 편집기를 건드리지 않게
 
 function genId() { return "s" + Date.now() + Math.floor(Math.random() * 1000); }
 
@@ -865,12 +865,12 @@ function newSong(switchTo = true) {
 
 function activeSession() { return sessions.find((s) => s.id === activeId) || null; }
 
-// 활성 곡을 현재 편집 상태로 저장(자동 저장의 핵심)
-let saveTimer = null;
+// 저장은 '저장' 버튼을 누를 때만 한다(자동 저장 없음). markDirty는 '저장 안 됨' 표시만 켠다.
+let dirty = false;
 function markDirty() {
   if (loading) return;
-  if (saveTimer) clearTimeout(saveTimer);
-  saveTimer = setTimeout(saveActive, 400); // 연속 편집을 모아 한 번에 저장
+  dirty = true;
+  updateSaveButton();
 }
 function saveActive() {
   const s = activeSession();
@@ -881,24 +881,46 @@ function saveActive() {
   sessions = [s, ...sessions.filter((x) => x.id !== s.id)];
   persistSessions();
   renderSessionList();
+  dirty = false;
+  updateSaveButton();
 }
 
-function flushSave() {
-  if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
-  saveActive();
+// 저장 버튼: 변경 있으면 강조(파랑) + '저장 *', 저장된 상태면 '저장됨'
+const saveBtn = document.getElementById("saveSong");
+function updateSaveButton() {
+  if (!saveBtn) return;
+  saveBtn.textContent = dirty ? "💾 저장 *" : "💾 저장됨";
+  saveBtn.style.background = dirty ? "#3b6ef0" : "";
+  saveBtn.style.color = dirty ? "#fff" : "";
+  saveBtn.title = dirty ? "저장하지 않은 변경이 있습니다 — 눌러서 저장" : "저장된 상태입니다";
 }
+if (saveBtn) saveBtn.addEventListener("click", () => {
+  if (!activeSession()) return;
+  saveActive();
+  showToast("저장됨 ✓");
+});
+
+// 저장 안 된 변경이 있으면 곡을 떠나기 전 물어본다(확인=저장, 취소=버림). 어느 쪽이든 이동은 진행.
+function guardUnsaved() {
+  if (!dirty) return;
+  if (confirm("저장하지 않은 변경이 있습니다.\n\n[확인] 저장하고 이동   [취소] 저장하지 않고 이동")) saveActive();
+  else { dirty = false; updateSaveButton(); }
+}
+// 창을 닫거나 새로고침할 때 저장 안 된 변경이 있으면 브라우저 기본 경고를 띄운다.
+window.addEventListener("beforeunload", (e) => { if (dirty) { e.preventDefault(); e.returnValue = ""; } });
 
 function openSession(id) {
   const s = sessions.find((x) => x.id === id);
   if (!s) return;
-  // 전환 전에 '나가는' 곡을 확실히 저장(첫 로드 때는 편집기가 비어 있으므로 건너뜀)
-  if (hasLoaded) flushSave();
+  // 전환 전에 '나가는' 곡의 저장 안 된 변경을 처리(저장할지 버릴지 물어봄)
+  if (hasLoaded) guardUnsaved();
   activeId = id;
   lsSet(LS_ACTIVE, id);
   deserialize(s.data);
   hasLoaded = true;
   songNameEl.textContent = s.name;
   renderSessionList();
+  dirty = false; updateSaveButton(); // 방금 불러온 곡은 저장된 상태
 }
 
 function deleteSession(id) {
@@ -1349,10 +1371,10 @@ const modalBody = document.getElementById("modalBody");
 function openShareModal() {
   const s = activeSession();
   if (!s) return;
-  if (hasLoaded) flushSave(); // 최신 편집을 반영
+  // 공유는 '저장 여부와 무관하게' 지금 화면의 편집 상태를 담는다(serialize).
   let code, url, err = null;
   try {
-    code = encodeShare(s.name, s.data);
+    code = encodeShare(s.name, serialize());
     url = location.origin + location.pathname + "#song=" + code;
   } catch (e) { err = e; }
 

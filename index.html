@@ -7,7 +7,7 @@
   <!-- 소리 엔진: Tone.js (Web Audio API 위에서 악기·타이밍·재생을 다룸) -->
   <script src="https://unpkg.com/tone@14.8.49/build/Tone.js"></script>
   <!-- ?v= 는 배포마다 올린다: 브라우저·GitHub Pages 캐시로 옛 버전이 남는 것을 막는다 -->
-  <link rel="stylesheet" href="style.css?v=43" />
+  <link rel="stylesheet" href="style.css?v=44" />
 </head>
 <body>
   <!-- 왼쪽에서 밀려나오는 세션(내 곡) 목록 + 메뉴 -->
@@ -21,7 +21,7 @@
 
     <div class="menu-section-title">앞으로 추가할 기능</div>
     <nav id="menuList" class="menu-list"><!-- JS가 채운다 --></nav>
-    <p class="drawer-foot">곡은 이 브라우저에 자동 저장됩니다.</p>
+    <p class="drawer-foot">곡은 💾 저장 버튼을 눌러야 이 브라우저에 저장됩니다.</p>
   </div>
   <div id="scrim" class="scrim" hidden></div>
 
@@ -63,6 +63,7 @@
     </label>
 
     <button id="addTrack">＋ 트랙 추가</button>
+    <button id="saveSong">💾 저장됨</button>
     <button id="share">🔗 공유</button>
   </section>
 
@@ -86,6 +87,6 @@
     </div>
   </div>
 
-  <script src="app.js?v=43"></script>
+  <script src="app.js?v=44"></script>
 </body>
 </html>
