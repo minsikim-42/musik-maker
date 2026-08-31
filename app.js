@@ -621,11 +621,12 @@ function renderTrack(track) {
       else if (isSharp(rowName)) cell.classList.add("black-key");
       if (c % 4 === 0) cell.classList.add("beat");
       if (track.grid[r][c]) cell.classList.add("on");
-      cell.addEventListener("click", () => {
+      cell.addEventListener("click", async () => {
         if (grid._dragged) return; // 방금 드래그로 스크롤했으면 클릭(음 찍기) 취소
         track.grid[r][c] = !track.grid[r][c];
         cell.classList.toggle("on", track.grid[r][c]);
-        if (track.grid[r][c]) preview(track, r);
+        // 첫 사용자 제스처에서 오디오 컨텍스트를 켠다 — 안 그러면 한 번 재생하기 전엔 미리듣기가 무음.
+        if (track.grid[r][c]) { await Tone.start(); preview(track, r); }
         markDirty();
       });
       grid.appendChild(cell);
@@ -724,6 +725,7 @@ function highlightColumn(col) {
 // ── 재생 위치(플레이헤드) + 타임라인 ────────────────────────────
 let playheadStep = 0;   // '현재 시점' — 여기서 재생 시작. 재생 중엔 진행 위치를 따라 움직인다.
 let playing = false;
+let paused = false;   // 일시정지 상태(Transport.pause, 위치 유지). '현재' 버튼으로 이어재생.
 const timelineEl = document.getElementById("timeline");
 const tlFill = document.getElementById("tlFill");
 const tlHandle = document.getElementById("tlHandle");
@@ -835,7 +837,7 @@ function deserialize(data) {
   for (const td of data.tracks || []) tracks.push(makeTrackObj(td.type, td));
   render();
   rebuildSequence();
-  playheadStep = 0; playing = false; updateTimeline(); // 곡을 열면 재생 위치는 처음으로
+  playheadStep = 0; playing = false; paused = false; updateTimeline(); // 곡을 열면 재생 위치는 처음으로
   loading = false;
 }
 
@@ -1029,10 +1031,37 @@ function setBpm(v, opts = {}) {
   if (!opts.silent) markDirty();
 }
 
-async function playFrom(fromStep) {
+const btnPlayStart = document.getElementById("playStart");
+const btnPlayHere = document.getElementById("playHere");
+// 버튼 라벨을 상태에 맞춰 갱신: 재생 중엔 둘 다 '일시정지', 멈춤/일시정지 땐 원래 라벨.
+function updateTransportButtons() {
+  if (playing) {
+    btnPlayStart.textContent = "⏸ 일시정지";
+    btnPlayHere.textContent = "⏸ 일시정지";
+  } else {
+    btnPlayStart.textContent = "⏮ 처음";
+    btnPlayHere.textContent = paused ? "▶ 이어서" : "▶ 현재";
+  }
+}
+function pausePlayback() {
+  Tone.Transport.pause();      // 위치를 유지한 채 멈춘다(이어재생 가능)
+  playing = false; paused = true;
+  updateTimeline();
+  updateTransportButtons();
+}
+async function playFrom(fromStep, opts = {}) {
+  if (playing) { pausePlayback(); return; } // 재생 중 재생버튼 클릭 = 일시정지(토글)
   await Tone.start();
-  if (Tone.Transport.state === "started") return; // 이미 재생 중이면 무시(중복 시작 방지)
   Tone.Transport.bpm.value = Number(bpm.value);
+  // 일시정지 상태에서 '현재(이어서)' → 위치 유지한 채 Transport만 재개
+  if (paused && opts.resume) {
+    paused = false; playing = true;
+    Tone.Transport.start("+0.05");
+    updateTransportButtons();
+    return;
+  }
+  // 새로 시작(처음부터 또는 지정 스텝부터)
+  paused = false;
   rebuildSequence();
   const N = Math.max(0, Math.min(steps - 1, Math.round(fromStep)));
   setPlayhead(N);
@@ -1041,14 +1070,16 @@ async function playFrom(fromStep) {
   // Transport를 시작 위치(N 16분음표)에서 켠다 → 그 스텝부터 재생
   const pos = `${Math.floor(N / STEPS_PER_BAR)}:${Math.floor((N % STEPS_PER_BAR) / 4)}:${N % 4}`;
   Tone.Transport.start("+0.05", pos);
+  updateTransportButtons();
 }
-document.getElementById("playStart").addEventListener("click", () => playFrom(0));       // 처음부터
-document.getElementById("playHere").addEventListener("click", () => playFrom(playheadStep)); // 현재 시점
+btnPlayStart.addEventListener("click", () => playFrom(0));                        // 처음부터(재생 중이면 일시정지)
+btnPlayHere.addEventListener("click", () => playFrom(playheadStep, { resume: true })); // 현재/이어서(재생 중이면 일시정지)
 document.getElementById("stop").addEventListener("click", () => {
   Tone.Transport.stop();
   if (seq) seq.stop();
-  playing = false;
+  playing = false; paused = false;
   updateTimeline(); // 멈춘 위치에 핸들·노란 열 유지(현재 시점 재생이 이어받음)
+  updateTransportButtons();
 });
 bpm.addEventListener("input", () => setBpm(bpm.value));
 // 숫자 입력: 타이핑 중엔 필드를 건드리지 않고(범위 내면 반영), 확정(blur/Enter) 때 클램프

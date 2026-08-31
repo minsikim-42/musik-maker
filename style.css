@@ -412,7 +412,9 @@ button.primary { background: var(--accent); color: #0b1020; font-weight: 600; bo
   box-shadow: inset 0 0 0 2px var(--playhead);
   background: rgba(255, 209, 102, .16);
 }
-.cell.on.playhead-col { box-shadow: inset 0 0 0 2px var(--playhead); } /* 켜진 칸은 색 유지 + 노란 테두리 */
+/* 켜진 칸이 현재열일 때: 노트 색을 그대로 두고(가려지지 않게) 노란 테두리만 덧입힌다 */
+.cell.on.playhead-col { background: var(--on); box-shadow: inset 0 0 0 2px var(--playhead); }
+.cell.on.drum.playhead-col { background: var(--on-drum); }
 
 footer { margin-top: 14px; color: var(--muted); font-size: 12px; }
 
