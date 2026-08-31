@@ -393,6 +393,12 @@ button.primary { background: var(--accent); color: #0b1020; font-weight: 600; bo
   padding-right: 8px;
   min-width: 48px;
   user-select: none;
+  /* 가로로 스크롤해도 음계 라벨은 왼쪽에 고정. 아래로 지나가는 노트를 가리도록 패널색 배경 + 위 z-index. */
+  position: sticky;
+  left: 0;
+  z-index: 3;
+  background: var(--panel);
+  box-shadow: 6px 0 6px -4px rgba(0, 0, 0, .35); /* 고정 라벨과 격자 사이 살짝 그림자로 경계 */
 }
 .label-cell.sharp { color: #6b7180; }
 .cell {
