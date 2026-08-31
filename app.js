@@ -107,7 +107,7 @@ function detectSampleFreq(toneBuf) {
 //     입력을 1/DRIVE로 축소해 넣고 곡선이 실제로는 ±DRIVE까지 다루게 설계한다.
 const MASTER_TRIM = 0.5;  // -6dB 헤드룸
 const MASTER_DRIVE = 6;   // 소프트 클립이 다루는 입력 범위(±6까지 매끄럽게)
-const REVERB_WET = 0.35;  // 트랙 잔향 켰을 때 젖음 비율(0=드라이, 1=완전 잔향)
+const REVERB_WET = 0.55;  // 트랙 잔향 켰을 때 젖음 비율(0=드라이, 1=완전 잔향)
 function softShape(s) {    // 0.9 이하는 그대로, 그 위는 tanh로 완만히 굽혀 ~1.0에서 멈춘다
   const t = 0.9, a = Math.abs(s), sg = Math.sign(s);
   return a <= t ? s : sg * (t + (1 - t) * Math.tanh((a - t) / (1 - t)));
@@ -172,7 +172,7 @@ function createVoices(track, out) {
   // 체인: 신스 → 트랙 볼륨 → 트랙 잔향(리버브) → 마스터.
   // 리버브 wet=0이면 완전 드라이(꺼짐), 켜면 꼬리가 붙어 소리가 더 오래 울린다.
   // 라이브 토글·해제 때 접근하려고 vol에 리버브 참조를 달아 둔다(반환 객체마다 안 달아도 되게).
-  const reverb = new Tone.Reverb({ decay: 2.4, preDelay: 0.01, wet: track.reverb ? REVERB_WET : 0 }).connect(out);
+  const reverb = new Tone.Reverb({ decay: 3.6, preDelay: 0.02, wet: track.reverb ? REVERB_WET : 0 }).connect(out);
   const vol = new Tone.Volume(track.volume ?? 0).connect(reverb);
   vol._reverb = reverb;
 
