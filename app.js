@@ -44,8 +44,10 @@ function trackSound(track) {
   return track.instrument && track.instrument.startsWith("snd:") ? findSound(track.instrument.slice(4)) : null;
 }
 
-// 오디오 샘플 소리: { id, name, kind:"sample", audio:<dataURL>, baseNote:"C4", volume }
+// 오디오 샘플 소리: { id, name, kind:"sample", audio:<dataURL>, baseNote:"C4", baseAuto, volume }
 // 디코드된 버퍼는 여기 캐시한다(id → Tone.ToneAudioBuffer). 로드는 비동기.
+// 재생은 원본 그대로(피치 변형 없음) — baseNote는 "이 파일이 원래 무슨 음인가"를 적어 두는
+// 참고 라벨일 뿐, 소리를 바꾸지 않는다. baseAuto=true면 로드 시 자동 감지로 채운다.
 const sampleBuffers = {};
 function loadSampleBuffer(sound) {
   if (!sound || sound.kind !== "sample" || !sound.audio) return;
@@ -53,12 +55,45 @@ function loadSampleBuffer(sound) {
   if (cached && cached.loaded) return;
   const buf = new Tone.ToneAudioBuffer(
     sound.audio,
-    () => { // 로드되면 이 소리를 쓰는 트랙 신스를 다시 만든다(폴백 → 샘플러)
+    () => { // 로드되면: (1) 음높이 자동 감지 (2) 이 소리를 쓰는 트랙 신스를 다시 만든다
+      if (sound.baseAuto !== false) {
+        const nm = freqToNoteName(detectSampleFreq(buf));
+        if (nm) sound.baseNote = nm;
+      }
       for (const t of tracks) if (t.instrument === "snd:" + sound.id) t.synth = buildSynth(t);
+      if (sampleEditorOpenId === sound.id) openSampleEditor(sound); // 편집기 열려 있으면 갱신
     },
     (e) => console.warn("샘플 로드 실패:", e)
   );
   sampleBuffers[sound.id] = buf;
+}
+
+// ── 음높이(기준 음) 자동 감지 ──────────────────────────────────
+// 자기상관으로 기본 주파수를 찾는다. 피아노처럼 배음이 강하면 옥타브가 흔들릴 수 있지만,
+// 재생은 원본 그대로라 이 값은 '참고 라벨'일 뿐이라 정확도가 소리를 좌우하지 않는다(사용자가 수정 가능).
+const NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+function freqToNoteName(f) {
+  if (!f || f <= 0) return null;
+  const midi = Math.round(69 + 12 * Math.log2(f / 440));
+  return NOTE_NAMES[((midi % 12) + 12) % 12] + (Math.floor(midi / 12) - 1);
+}
+function detectSampleFreq(toneBuf) {
+  let ab = null;
+  try { ab = toneBuf && toneBuf.get ? toneBuf.get() : toneBuf; } catch (e) {}
+  if (!ab || !ab.getChannelData) return null;
+  const sr = ab.sampleRate, ch = ab.getChannelData(0), N = ch.length;
+  const s = Math.min(Math.floor(0.15 * sr), Math.max(0, N - 1)); // 어택 뒤 안정 구간
+  const e = Math.min(Math.floor(0.55 * sr), N);
+  if (e - s < sr / 50) return null;
+  let mean = 0; for (let i = s; i < e; i++) mean += ch[i]; mean /= (e - s);
+  const minLag = Math.max(2, Math.floor(sr / 1000)), maxLag = Math.floor(sr / 60); // 60~1000Hz
+  let best = -Infinity, bestLag = 0;
+  for (let lag = minLag; lag < maxLag; lag++) {
+    let sum = 0;
+    for (let i = s; i + lag < e; i += 2) sum += (ch[i] - mean) * (ch[i + lag] - mean);
+    if (sum > best) { best = sum; bestLag = lag; }
+  }
+  return (bestLag > 0 && best > 0) ? sr / bestLag : null;
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -164,18 +199,25 @@ function createVoices(track, out) {
   // 커스텀 소리(라이브러리 참조)
   const snd = trackSound(track);
   if (snd && snd.kind === "sample") {
-    // 오디오 샘플: 한 샘플을 음정에 맞춰 재생(Tone.Sampler). 버퍼가 준비됐을 때만.
+    // 오디오 샘플: 올린 파일을 '원본 그대로' 재생한다(피치 변형 없음).
+    // 타격마다 새 ToneBufferSource를 재생(rate=1) → 드럼 원샷과 같은 폴리포닉 방식.
+    // baseNote는 소리에 영향을 주지 않는 참고 라벨이라 여기서 쓰지 않는다.
     const buf = sampleBuffers[snd.id];
+    const sVol = new Tone.Volume(snd.volume ?? -6).connect(vol); // 샘플 자체 볼륨
     if (buf && buf.loaded) {
-      const sampler = new Tone.Sampler({ urls: { [snd.baseNote || "C4"]: buf } }).connect(vol);
-      sampler.volume.value = snd.volume ?? -6;
-      return { kind: "melody", poly: sampler, vol }; // Sampler도 triggerAttackRelease(note,dur,time) 동일
+      const play = (time) => {
+        try {
+          const src = new Tone.ToneBufferSource(buf).connect(sVol);
+          const t = (time == null) ? Tone.now() : Math.max(0, time);
+          src.start(t);
+          src.stop(t + buf.duration + 0.02); // 명시적 정지(내부 음수 계산 회피)
+          setTimeout(() => { try { src.dispose(); } catch (e) {} }, (buf.duration + 0.4) * 1000);
+        } catch (e) { /* 무시 */ }
+      };
+      return { kind: "sample", play, sVol, vol };
     }
-    // 아직 로딩 전 → 조용한 폴백(로드되면 loadSampleBuffer가 재생성)
-    loadSampleBuffer(snd);
-    const silent = new Tone.PolySynth(Tone.Synth).connect(vol);
-    silent.volume.value = -60;
-    return { kind: "melody", poly: silent, vol };
+    loadSampleBuffer(snd); // 아직 로딩 전 → 무음, 로드되면 재생성
+    return { kind: "sample", play: () => {}, sVol, vol };
   }
   if (snd) {
     // 신스 소리: 사용자가 만든 음색. 로우패스 필터로 컷오프까지 조절.
@@ -259,6 +301,7 @@ function applySoundToTracks(sound) {
 function disposeSynth(s) {
   if (!s) return;
   if (s.kind === "drums") { s.snareOut.dispose(); s.hatOut.dispose(); }
+  else if (s.kind === "sample") { if (s.sVol) s.sVol.dispose(); }
   else { s.poly.dispose(); if (s.filt) s.filt.dispose(); }
   if (s.vol) s.vol.dispose();
 }
@@ -280,6 +323,9 @@ function triggerTrack(track, col, time) {
       else if (rows[r] === "스네어") s.hitSnare(time);
       else s.hitHat(time);
     }
+  } else if (track.synth.kind === "sample") {
+    // 샘플은 피치 변형이 없으므로 어느 칸이든 같은 원본 소리 → 한 칸이라도 켜졌으면 한 번만 재생
+    for (let r = 0; r < rows.length; r++) if (track.grid[r][col]) { track.synth.play(time); break; }
   } else {
     const notesOn = [];
     for (let r = 0; r < rows.length; r++) if (track.grid[r][col]) notesOn.push(rows[r]);
@@ -295,6 +341,8 @@ function preview(track, r) {
     if (rows[r] === "킥") s.hitKick();
     else if (rows[r] === "스네어") s.hitSnare();
     else s.hitHat();
+  } else if (track.synth.kind === "sample") {
+    track.synth.play();
   } else {
     track.synth.poly.triggerAttackRelease(rows[r], "16n");
   }
@@ -1304,13 +1352,14 @@ function openShareModal() {
   }
   modal.hidden = false;
 }
-function closeModal() { modal.hidden = true; }
+function closeModal() { modal.hidden = true; sampleEditorOpenId = null; }
 
 // ── 신디사이저: 소리 관리자 + 음색 편집기 ─────────────────────
 const WAVE_LABEL = { sine: "사인 ∿", triangle: "삼각 △", square: "사각 ⊓", sawtooth: "톱니 ◺" };
 
 // 소리 목록 관리자: 추가/편집/이름변경/삭제
 function openSoundManager() {
+  sampleEditorOpenId = null; // 샘플 편집기를 벗어남(로드 후 자동 갱신이 되돌리지 않게)
   modalTitle.textContent = "🎹 소리 (신디사이저)";
   modalBody.innerHTML = "";
 
@@ -1354,7 +1403,7 @@ function openSoundManager() {
     const usedBy = tracks.filter((t) => t.instrument === "snd:" + snd.id).length;
     const usedTxt = usedBy ? ` · 트랙 ${usedBy}개 사용` : "";
     const sub = snd.kind === "sample"
-      ? `오디오 샘플 · 기준 ${snd.baseNote || "C4"}${usedTxt}`
+      ? `오디오 샘플 · 원본 그대로 · 기준음 ${snd.baseNote || "C4"}(참고)${usedTxt}`
       : `${WAVE_LABEL[snd.wave] || snd.wave} · 컷오프 ${Math.round(snd.cutoff)}Hz${usedTxt}`;
     main.innerHTML = `<span class="s-name">${snd.kind === "sample" ? "🎵" : "🎹"} ${escapeHtml(snd.name)}</span>
       <span class="s-time">${sub}</span>`;
@@ -1409,7 +1458,7 @@ function onSampleFile(file) {
   const reader = new FileReader();
   reader.onload = () => {
     const name = (file.name || "샘플").replace(/\.[^.]+$/, "").slice(0, 40) || "샘플";
-    const s = { id: genSoundId(), name, kind: "sample", audio: reader.result, baseNote: "C4", volume: -6 };
+    const s = { id: genSoundId(), name, kind: "sample", audio: reader.result, baseNote: "C4", baseAuto: true, volume: -6 };
     soundLib.push(s);
     loadSampleBuffer(s);
     markDirty(); render();
@@ -1522,11 +1571,16 @@ async function playSoundPreview(sound) {
 }
 
 // ── 오디오 샘플 소리 편집기 ────────────────────────────────────
-const SAMPLE_BASE_NOTES = ["C3", "E3", "G3", "A3", "C4", "E4", "G4", "A4", "C5"];
+// 기준 음 후보: 넓은 반음 범위(C2~B5). 자동 감지 결과가 어디로 나와도 목록에 들어오게 한다.
+const SAMPLE_BASE_NOTES = (() => {
+  const arr = []; for (let o = 2; o <= 5; o++) for (const n of NOTE_NAMES) arr.push(n + o); return arr;
+})();
+let sampleEditorOpenId = null; // 현재 열린 샘플 편집기(로드 후 자동 갱신용)
 function rebuildTracksUsing(sound) {
   for (const t of tracks) if (t.instrument === "snd:" + sound.id) t.synth = buildSynth(t);
 }
 function openSampleEditor(sound) {
+  sampleEditorOpenId = sound.id;
   modalTitle.textContent = "🎵 " + sound.name;
   modalBody.innerHTML = "";
 
@@ -1536,21 +1590,33 @@ function openSampleEditor(sound) {
   modalBody.appendChild(back);
 
   const intro = document.createElement("p");
-  intro.textContent = "불러온 오디오를 음정에 맞춰 재생합니다. '기준 음'은 이 파일이 원래 내는 음(그 음에서 원본 그대로 나고, 다른 음은 올리거나 내려서 냅니다).";
+  intro.textContent = "불러온 오디오를 원본 그대로 재생합니다(음높이를 바꾸지 않음). '기준 음'은 이 파일이 원래 무슨 음인지 적어 두는 참고용 라벨일 뿐, 소리에는 영향을 주지 않습니다.";
   modalBody.appendChild(intro);
 
-  // 기준 음
+  // 기준 음(참고용) + 자동 감지
   const baseWrap = document.createElement("label");
   baseWrap.className = "synth-field";
-  baseWrap.innerHTML = `<div class="synth-label">기준 음</div>`;
+  baseWrap.innerHTML = `<div class="synth-label">기준 음 (참고용)</div>`;
+  const baseRow = document.createElement("div"); baseRow.className = "share-row";
   const baseSel = document.createElement("select");
   for (const n of SAMPLE_BASE_NOTES) {
     const o = document.createElement("option"); o.value = n; o.textContent = n;
     if ((sound.baseNote || "C4") === n) o.selected = true;
     baseSel.appendChild(o);
   }
-  baseSel.addEventListener("change", () => { sound.baseNote = baseSel.value; rebuildTracksUsing(sound); markDirty(); });
-  baseWrap.appendChild(baseSel);
+  // 사용자가 직접 고르면 자동 감지가 다시 덮어쓰지 않도록 baseAuto 해제(소리는 안 바뀜)
+  baseSel.addEventListener("change", () => { sound.baseNote = baseSel.value; sound.baseAuto = false; markDirty(); });
+  const detectBtn = document.createElement("button");
+  detectBtn.type = "button"; detectBtn.textContent = "🎯 자동 감지";
+  detectBtn.addEventListener("click", () => {
+    const buf = sampleBuffers[sound.id];
+    if (!buf || !buf.loaded) { showToast("샘플을 불러오는 중입니다…"); return; }
+    const nm = freqToNoteName(detectSampleFreq(buf));
+    if (nm) { sound.baseNote = nm; sound.baseAuto = true; markDirty(); openSampleEditor(sound); showToast("감지된 음: " + nm); }
+    else showToast("음높이를 감지하지 못했습니다");
+  });
+  baseRow.appendChild(baseSel); baseRow.appendChild(detectBtn);
+  baseWrap.appendChild(baseRow);
   modalBody.appendChild(baseWrap);
 
   // 볼륨
@@ -1600,10 +1666,11 @@ async function playSamplePreview(sound) {
   await Tone.start();
   const buf = sampleBuffers[sound.id];
   if (!buf || !buf.loaded) { showToast("샘플을 불러오는 중입니다…"); return; }
-  const sampler = new Tone.Sampler({ urls: { [sound.baseNote || "C4"]: buf } }).connect(realtimeMaster());
-  sampler.volume.value = sound.volume ?? -6;
-  sampler.triggerAttackRelease(["C4", "E4", "G4"], 0.8);
-  setTimeout(() => sampler.dispose(), 2200);
+  // 원본 그대로 한 번 재생(피치 변형 없음) — 실제 찍었을 때와 같은 소리
+  const sVol = new Tone.Volume(sound.volume ?? -6).connect(realtimeMaster());
+  const src = new Tone.ToneBufferSource(buf).connect(sVol);
+  src.start(Tone.now());
+  setTimeout(() => { try { src.dispose(); sVol.dispose(); } catch (e) {} }, (buf.duration + 0.4) * 1000);
 }
 
 async function copyText(text, inputEl) {
@@ -1639,6 +1706,8 @@ function scheduleTrackOffline(track, voices, secondsPerStep) {
         else if (rows[r] === "스네어") voices.hitSnare(time);
         else voices.hitHat(time);
       }
+    } else if (voices.kind === "sample") {
+      for (let r = 0; r < rows.length; r++) if (track.grid[r][c]) { voices.play(time); break; }
     } else {
       const notes = [];
       for (let r = 0; r < rows.length; r++) if (track.grid[r][c]) notes.push(rows[r]);
