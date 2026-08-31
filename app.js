@@ -207,7 +207,9 @@ function createVoices(track, out) {
     if (buf && buf.loaded) {
       const sampler = new Tone.Sampler({ urls: { [snd.baseNote || "C4"]: buf } }).connect(vol);
       sampler.volume.value = snd.volume ?? -6;
-      return { kind: "melody", poly: sampler, vol }; // Sampler도 triggerAttackRelease(note,dur,time) 동일
+      // 각 음을 16분음표로 자르지 않고 '녹음 전체 길이'만큼 울리게 한다(피아노가 자연 감쇠하도록).
+      // noteDur가 있는 보이스는 트리거 시 이 길이를 쓴다.
+      return { kind: "melody", poly: sampler, vol, noteDur: buf.duration };
     }
     loadSampleBuffer(snd); // 아직 로딩 전 → 무음, 로드되면 재생성
     const silent = new Tone.PolySynth(Tone.Synth).connect(vol);
@@ -320,7 +322,7 @@ function triggerTrack(track, col, time) {
   } else {
     const notesOn = [];
     for (let r = 0; r < rows.length; r++) if (track.grid[r][col]) notesOn.push(rows[r]);
-    if (notesOn.length) track.synth.poly.triggerAttackRelease(notesOn, "16n", time);
+    if (notesOn.length) track.synth.poly.triggerAttackRelease(notesOn, track.synth.noteDur || "16n", time);
   }
 }
 
@@ -333,7 +335,7 @@ function preview(track, r) {
     else if (rows[r] === "스네어") s.hitSnare();
     else s.hitHat();
   } else {
-    track.synth.poly.triggerAttackRelease(rows[r], "16n");
+    track.synth.poly.triggerAttackRelease(rows[r], track.synth.noteDur || "16n");
   }
 }
 
@@ -1659,8 +1661,8 @@ async function playSamplePreview(sound) {
   const base = sound.baseNote || "C4";
   const sampler = new Tone.Sampler({ urls: { [base]: buf } }).connect(realtimeMaster());
   sampler.volume.value = sound.volume ?? -6;
-  sampler.triggerAttackRelease(base, 0.9);
-  setTimeout(() => sampler.dispose(), 2200);
+  sampler.triggerAttackRelease(base, buf.duration); // 녹음 전체 길이만큼 울린다(끊기지 않게)
+  setTimeout(() => sampler.dispose(), (buf.duration + 0.5) * 1000);
 }
 
 async function copyText(text, inputEl) {
@@ -1699,7 +1701,7 @@ function scheduleTrackOffline(track, voices, secondsPerStep) {
     } else {
       const notes = [];
       for (let r = 0; r < rows.length; r++) if (track.grid[r][c]) notes.push(rows[r]);
-      if (notes.length) voices.poly.triggerAttackRelease(notes, secondsPerStep, time);
+      if (notes.length) voices.poly.triggerAttackRelease(notes, voices.noteDur || secondsPerStep, time);
     }
   }
 }
@@ -1748,7 +1750,14 @@ async function exportWav() {
   showToast("WAV 만드는 중…");
   try {
     const secondsPerStep = (60 / Number(bpm.value)) / 4; // 16분음표 길이
-    const duration = steps * secondsPerStep + 2;         // 뒤에 여운 2초
+    // 여운: 기본 2초 + 울리는 샘플(녹음 전체 길이만큼 남)이 있으면 그 최대 길이만큼 더 준다.
+    let tail = 2;
+    for (const t of tracks) {
+      const s = trackSound(t);
+      const b = s && s.kind === "sample" ? sampleBuffers[s.id] : null;
+      if (b && b.loaded) tail = Math.max(tail, b.duration + 0.3);
+    }
+    const duration = steps * secondsPerStep + tail;
     const buffer = await Tone.Offline(() => {
       // 콜백 안에서 만든 Tone 노드는 오프라인 컨텍스트에 붙는다(재생용 신스는 안 건드림)
       const out = makeMaster(); // 재생과 동일한 마스터 소프트 클리퍼
