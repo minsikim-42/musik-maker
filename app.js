@@ -107,6 +107,7 @@ function detectSampleFreq(toneBuf) {
 //     입력을 1/DRIVE로 축소해 넣고 곡선이 실제로는 ±DRIVE까지 다루게 설계한다.
 const MASTER_TRIM = 0.5;  // -6dB 헤드룸
 const MASTER_DRIVE = 6;   // 소프트 클립이 다루는 입력 범위(±6까지 매끄럽게)
+const REVERB_WET = 0.35;  // 트랙 잔향 켰을 때 젖음 비율(0=드라이, 1=완전 잔향)
 function softShape(s) {    // 0.9 이하는 그대로, 그 위는 tanh로 완만히 굽혀 ~1.0에서 멈춘다
   const t = 0.9, a = Math.abs(s), sg = Math.sign(s);
   return a <= t ? s : sg * (t + (1 - t) * Math.tanh((a - t) / (1 - t)));
@@ -168,8 +169,12 @@ function makeKickBuffer(peak) {
 // out = 최종 출력 노드(마스터 리미터). → 재생용(buildSynth)과 WAV 오프라인 렌더가 공유한다.
 function createVoices(track, out) {
   out = out || realtimeMaster();
-  // 트랙 전용 볼륨 노드: 신스 → 트랙 볼륨 → 마스터. 트랙별 소리 크기를 라이브로 조절.
-  const vol = new Tone.Volume(track.volume ?? 0).connect(out);
+  // 체인: 신스 → 트랙 볼륨 → 트랙 잔향(리버브) → 마스터.
+  // 리버브 wet=0이면 완전 드라이(꺼짐), 켜면 꼬리가 붙어 소리가 더 오래 울린다.
+  // 라이브 토글·해제 때 접근하려고 vol에 리버브 참조를 달아 둔다(반환 객체마다 안 달아도 되게).
+  const reverb = new Tone.Reverb({ decay: 2.4, preDelay: 0.01, wet: track.reverb ? REVERB_WET : 0 }).connect(out);
+  const vol = new Tone.Volume(track.volume ?? 0).connect(reverb);
+  vol._reverb = reverb;
 
   if (track.type === "drums") {
     // 세 드럼 모두 '타격마다 새 원샷(폴리포닉)'으로 재생한다.
@@ -299,13 +304,22 @@ function disposeSynth(s) {
   if (!s) return;
   if (s.kind === "drums") { s.snareOut.dispose(); s.hatOut.dispose(); }
   else { s.poly.dispose(); if (s.filt) s.filt.dispose(); }
+  const rv = s.vol && s.vol._reverb;
   if (s.vol) s.vol.dispose();
+  if (rv) rv.dispose();
 }
 
 // 트랙 볼륨을 라이브로 조절(재생성 없이)
 function setTrackVolume(track, db) {
   track.volume = db;
   if (track.synth && track.synth.vol) track.synth.vol.volume.value = db;
+}
+
+// 트랙 잔향(리버브) 켜고 끄기를 라이브로(재생성 없이). wet만 바꾼다.
+function setTrackReverb(track, on) {
+  track.reverb = !!on;
+  const rv = track.synth && track.synth.vol && track.synth.vol._reverb;
+  if (rv) rv.wet.value = on ? REVERB_WET : 0;
 }
 
 function triggerTrack(track, col, time) {
@@ -361,6 +375,7 @@ function makeTrackObj(type, data) {
     muted: data?.muted ?? false,
     collapsed: data?.collapsed ?? false,
     volume: data?.volume ?? 0,
+    reverb: data?.reverb ?? false,
     grid: null,
     synth: null,
     cellEls: null,
@@ -563,6 +578,18 @@ function renderTrack(track) {
   muteBtn.textContent = track.muted ? "음소거 해제" : "음소거";
   muteBtn.addEventListener("click", () => { track.muted = !track.muted; render(); markDirty(); });
   head.appendChild(muteBtn);
+
+  // 트랙 잔향(리버브) 토글 — 켜면 소리에 꼬리가 붙어 더 오래 울린다. 재생성 없이 라이브 적용.
+  const revBtn = document.createElement("button");
+  const setRevLabel = () => {
+    revBtn.textContent = track.reverb ? "잔향 ●" : "잔향 ○";
+    revBtn.style.background = track.reverb ? "#3b6ef0" : "";
+    revBtn.style.color = track.reverb ? "#fff" : "";
+  };
+  setRevLabel();
+  revBtn.title = "이 트랙에 잔향(리버브)을 켜고 끕니다";
+  revBtn.addEventListener("click", () => { setTrackReverb(track, !track.reverb); setRevLabel(); markDirty(); });
+  head.appendChild(revBtn);
 
   if (!collapsed) {
     const delBtn = document.createElement("button");
@@ -784,6 +811,7 @@ function serialize() {
       muted: t.muted,
       collapsed: !!t.collapsed,
       volume: t.volume ?? 0,
+      reverb: !!t.reverb,
       grid: t.grid.map((row) => row.slice()),
     })),
   };
@@ -1758,10 +1786,13 @@ async function exportWav() {
       if (b && b.loaded) tail = Math.max(tail, b.duration + 0.3);
     }
     const duration = steps * secondsPerStep + tail;
-    const buffer = await Tone.Offline(() => {
+    const buffer = await Tone.Offline(async () => {
       // 콜백 안에서 만든 Tone 노드는 오프라인 컨텍스트에 붙는다(재생용 신스는 안 건드림)
       const out = makeMaster(); // 재생과 동일한 마스터 소프트 클리퍼
-      for (const t of tracks) scheduleTrackOffline(t, createVoices(t, out), secondsPerStep);
+      const vs = tracks.map((t) => ({ t, v: createVoices(t, out) }));
+      // 리버브는 IR 생성이 끝나야 오프라인 렌더에 잔향이 담긴다 → 스케줄 전에 대기.
+      await Promise.all(vs.map(({ v }) => { const rv = v.vol && v.vol._reverb; return rv && rv.generate ? rv.generate() : null; }).filter(Boolean));
+      for (const { t, v } of vs) scheduleTrackOffline(t, v, secondsPerStep);
     }, duration);
     const audioBuf = buffer.get ? buffer.get() : buffer; // ToneAudioBuffer → AudioBuffer
     const blob = audioBufferToWav(audioBuf);
