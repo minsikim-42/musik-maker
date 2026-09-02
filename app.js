@@ -621,14 +621,7 @@ function renderTrack(track) {
       else if (isSharp(rowName)) cell.classList.add("black-key");
       if (c % 4 === 0) cell.classList.add("beat");
       if (track.grid[r][c]) cell.classList.add("on");
-      cell.addEventListener("click", async () => {
-        if (grid._dragged) return; // 방금 드래그로 스크롤했으면 클릭(음 찍기) 취소
-        track.grid[r][c] = !track.grid[r][c];
-        cell.classList.toggle("on", track.grid[r][c]);
-        // 첫 사용자 제스처에서 오디오 컨텍스트를 켠다 — 안 그러면 한 번 재생하기 전엔 미리듣기가 무음.
-        if (track.grid[r][c]) { await Tone.start(); preview(track, r); }
-        markDirty();
-      });
+      cell._r = r; cell._c = c; // 탭 위임(enableCellTap)에서 좌표 조회
       grid.appendChild(cell);
       track.cellEls[r][c] = cell;
     }
@@ -660,6 +653,7 @@ function renderTrack(track) {
     syncTracksHorizontally(box); // '트랙 고정'이 켜져 있으면 나머지 트랙 가로도 맞춘다
   });
   if (track.type === "melody") enableDragScroll(box, grid); // 마우스 세로 드래그(grid._dragged로 클릭 취소)
+  enableCellTap(grid, track); // 관대한 탭으로 음 찍기(살짝 움직이거나 오래 눌러도 인식)
 
   const rowH = 26; // 셀 24 + 간격 2
   const defTop = track.type === "melody" ? Math.max(0, MELODY_NOTES.indexOf(DEFAULT_TOP_NOTE) * rowH) : 0;
@@ -672,7 +666,8 @@ function renderTrack(track) {
 }
 
 // 마우스로 세로 컨테이너를 끌면 스크롤(음역 이동). 터치는 브라우저 기본 스크롤(pan-y)에 맡긴다.
-// 이동 문턱(6px)을 넘으면 드래그로 보고 셀 클릭(음 찍기)을 취소한다(flagEl._dragged).
+// 이동 문턱(10px)을 넘어야 드래그로 보고 셀 탭(음 찍기)을 취소한다(flagEl._dragged).
+// 문턱을 6→10으로 키운 이유: 클릭할 때 손이 살짝 흔들려도(≤10px) 음이 찍히도록.
 function enableDragScroll(scrollEl, flagEl) {
   let st = null;
   scrollEl.addEventListener("pointerdown", (e) => {
@@ -683,7 +678,7 @@ function enableDragScroll(scrollEl, flagEl) {
   scrollEl.addEventListener("pointermove", (e) => {
     if (!st) return;
     const dy = e.clientY - st.y;
-    if (!st.moved && Math.abs(dy) < 6) return;
+    if (!st.moved && Math.abs(dy) < 10) return;
     st.moved = true;
     flagEl._dragged = true;
     scrollEl.scrollTop = st.top - dy;
@@ -696,6 +691,36 @@ function enableDragScroll(scrollEl, flagEl) {
   };
   scrollEl.addEventListener("pointerup", end);
   scrollEl.addEventListener("pointercancel", end);
+}
+
+// 셀 '탭'으로 음 찍기 — 네이티브 click 대신 포인터로 판정해 관대하게 인식한다.
+// grid에 위임: pointerdown에서 셀을 기억 → pointerup 때 이동이 TAP_SLOP 이내면 그 셀을 토글.
+// 이 방식의 장점: (1) 홀드 시간 제한 없음(오래 눌러도 찍힘), (2) 살짝 움직여도(≤슬롭) 찍힘,
+// (3) 터치에서 실제 스크롤이 시작되면 브라우저가 pointercancel을 주므로 스크롤과 확실히 구분된다.
+const TAP_SLOP = 12; // 이 픽셀 이내로 움직인 손뗌은 탭으로 본다(스크롤/드래그와 구분).
+function enableCellTap(grid, track) {
+  let tap = null;
+  grid.addEventListener("pointerdown", (e) => {
+    const cell = e.target.closest(".cell");
+    tap = cell ? { id: e.pointerId, x: e.clientX, y: e.clientY, cell, moved: false } : null;
+  });
+  grid.addEventListener("pointermove", (e) => {
+    if (!tap || e.pointerId !== tap.id) return;
+    if (Math.abs(e.clientX - tap.x) > TAP_SLOP || Math.abs(e.clientY - tap.y) > TAP_SLOP) tap.moved = true;
+  });
+  grid.addEventListener("pointercancel", () => { tap = null; }); // 스크롤 시작 등 → 탭 취소
+  grid.addEventListener("pointerup", async (e) => {
+    if (!tap || e.pointerId !== tap.id) return;
+    const t = tap; tap = null;
+    if (t.moved || grid._dragged) return; // 드래그(스크롤)면 음 안 찍음
+    const cell = t.cell, r = cell._r, c = cell._c;
+    if (r == null || c == null) return;
+    track.grid[r][c] = !track.grid[r][c];
+    cell.classList.toggle("on", track.grid[r][c]);
+    // pointerup은 사용자 제스처 → 오디오 컨텍스트를 켠 뒤 미리듣기(첫 음 무음 방지).
+    if (track.grid[r][c]) { await Tone.start(); preview(track, r); }
+    markDirty();
+  });
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -791,14 +816,14 @@ let hasLoaded = false; // 첫 곡을 아직 안 열었으면 이탈 가드가 �
 function genId() { return "s" + Date.now() + Math.floor(Math.random() * 1000); }
 
 function lsGet(key) { try { return localStorage.getItem(key); } catch { return null; } }
-function lsSet(key, val) { try { localStorage.setItem(key, val); } catch { /* 저장 불가 시 메모리에만 */ } }
+function lsSet(key, val) { try { localStorage.setItem(key, val); return true; } catch { return false; /* 용량 초과 등 → 저장 실패 */ } }
 
 function loadSessionsFromStorage() {
   const raw = lsGet(LS_SESSIONS);
   if (raw) { try { sessions = JSON.parse(raw) || []; } catch { sessions = []; } }
   activeId = lsGet(LS_ACTIVE);
 }
-function persistSessions() { lsSet(LS_SESSIONS, JSON.stringify(sessions)); }
+function persistSessions() { return lsSet(LS_SESSIONS, JSON.stringify(sessions)); }
 
 // 현재 편집 상태 → 저장용 데이터
 function serialize() {
@@ -867,6 +892,7 @@ function activeSession() { return sessions.find((s) => s.id === activeId) || nul
 
 // 저장은 '저장' 버튼을 누를 때만 한다(자동 저장 없음). markDirty는 '저장 안 됨' 표시만 켠다.
 let dirty = false;
+let saveFailed = false; // 마지막 저장이 용량 초과 등으로 실패했는가(성공했다고 착각하지 않게)
 function markDirty() {
   if (loading) return;
   dirty = true;
@@ -874,30 +900,41 @@ function markDirty() {
 }
 function saveActive() {
   const s = activeSession();
-  if (!s) return;
+  if (!s) return false;
   s.data = serialize();
   s.updatedAt = Date.now();
   // 최근 수정한 곡을 목록 맨 위로
   sessions = [s, ...sessions.filter((x) => x.id !== s.id)];
-  persistSessions();
+  const ok = persistSessions(); // 실제 localStorage 기록 성공 여부
   renderSessionList();
-  dirty = false;
+  saveFailed = !ok;
+  if (ok) dirty = false;        // 실패면 dirty 유지 → '저장됨'으로 속이지 않음
   updateSaveButton();
+  return ok;
 }
 
-// 저장 버튼: 변경 있으면 강조(파랑) + '저장 *', 저장된 상태면 '저장됨'
+// 저장 버튼: 실패=빨강 경고, 변경 있음=파랑 '저장 *', 저장됨='저장됨'
 const saveBtn = document.getElementById("saveSong");
 function updateSaveButton() {
   if (!saveBtn) return;
-  saveBtn.textContent = dirty ? "💾 저장 *" : "💾 저장됨";
-  saveBtn.style.background = dirty ? "#3b6ef0" : "";
-  saveBtn.style.color = dirty ? "#fff" : "";
-  saveBtn.title = dirty ? "저장하지 않은 변경이 있습니다 — 눌러서 저장" : "저장된 상태입니다";
+  if (saveFailed) {
+    saveBtn.textContent = "⚠ 저장 실패";
+    saveBtn.style.background = "#c0392b"; saveBtn.style.color = "#fff";
+    saveBtn.title = "저장 공간이 가득 찼습니다 — 오디오 샘플이나 곡을 줄여 보세요";
+  } else if (dirty) {
+    saveBtn.textContent = "💾 저장 *";
+    saveBtn.style.background = "#3b6ef0"; saveBtn.style.color = "#fff";
+    saveBtn.title = "저장하지 않은 변경이 있습니다 — 눌러서 저장";
+  } else {
+    saveBtn.textContent = "💾 저장됨";
+    saveBtn.style.background = ""; saveBtn.style.color = "";
+    saveBtn.title = "저장된 상태입니다";
+  }
 }
 if (saveBtn) saveBtn.addEventListener("click", () => {
   if (!activeSession()) return;
-  saveActive();
-  showToast("저장됨 ✓");
+  if (saveActive()) showToast("저장됨 ✓");
+  else showToast("저장 실패 — 저장 공간이 가득 찼어요. 오디오 샘플을 줄이거나 곡을 지워 보세요.");
 });
 
 // 저장 안 된 변경이 있으면 곡을 떠나기 전 물어본다(확인=저장, 취소=버림). 어느 쪽이든 이동은 진행.
@@ -920,7 +957,7 @@ function openSession(id) {
   hasLoaded = true;
   songNameEl.textContent = s.name;
   renderSessionList();
-  dirty = false; updateSaveButton(); // 방금 불러온 곡은 저장된 상태
+  dirty = false; saveFailed = false; updateSaveButton(); // 방금 불러온 곡은 저장된 상태
 }
 
 function deleteSession(id) {

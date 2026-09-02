@@ -407,6 +407,10 @@ button.primary { background: var(--accent); color: #0b1020; font-weight: 600; bo
   height: 24px;
   border-radius: 4px;
   cursor: pointer;
+  /* 오래 눌러도(홀드) 텍스트 선택/롱프레스 메뉴가 떠서 탭을 삼키지 않게 */
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
 }
 .cell.black-key { background: var(--black-key); }
 .cell.beat { box-shadow: inset 2px 0 0 #2f3442; }
