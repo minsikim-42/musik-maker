@@ -1,4 +1,4 @@
-// music-maker — 3단계: 곡을 "세션"처럼 저장/전환 (왼쪽 드로어 = 내 곡 목록)
+// musik-maker — 3단계: 곡을 "세션"처럼 저장/전환 (왼쪽 드로어 = 내 곡 목록)
 // 세션 = 곡 하나(트랙·악기·격자·템포·마디). 브라우저 localStorage에 저장된다.
 // 목록에서 곡을 누르면 그 곡이 열린다. 저장은 '저장' 버튼을 누를 때만 한다(자동 저장 없음).
 
@@ -805,8 +805,26 @@ timelineEl.addEventListener("pointercancel", tlEnd);
 // ══════════════════════════════════════════════════════════════
 //  세션 저장소 (곡 목록) — localStorage
 // ══════════════════════════════════════════════════════════════
-const LS_SESSIONS = "music-maker.sessions";
-const LS_ACTIVE = "music-maker.activeId";
+const LS_SESSIONS = "musik-maker.sessions";
+const LS_ACTIVE = "musik-maker.activeId";
+const LS_SYNC = "musik-maker.syncScroll";
+// music-maker → musik-maker 이름 변경(2026). GitHub Pages 프로젝트 사이트는 같은 origin이라
+// 예전 키가 그대로 읽힌다 → 새 키가 비어 있으면 예전 키 값을 한 번 옮겨 저장한 곡을 잃지 않게 한다.
+function migrateOldStorageKeys() {
+  const pairs = [
+    ["music-maker.sessions", LS_SESSIONS],
+    ["music-maker.activeId", LS_ACTIVE],
+    ["music-maker.syncScroll", LS_SYNC],
+  ];
+  for (const [oldK, newK] of pairs) {
+    try {
+      if (localStorage.getItem(newK) == null) {
+        const v = localStorage.getItem(oldK);
+        if (v != null) localStorage.setItem(newK, v);
+      }
+    } catch {}
+  }
+}
 
 let sessions = [];   // [{ id, name, updatedAt, data }]
 let activeId = null;
@@ -819,6 +837,7 @@ function lsGet(key) { try { return localStorage.getItem(key); } catch { return n
 function lsSet(key, val) { try { localStorage.setItem(key, val); return true; } catch { return false; /* 용량 초과 등 → 저장 실패 */ } }
 
 function loadSessionsFromStorage() {
+  migrateOldStorageKeys(); // 예전(music-maker) 저장을 새 키로 옮긴 뒤 읽는다
   const raw = lsGet(LS_SESSIONS);
   if (raw) { try { sessions = JSON.parse(raw) || []; } catch { sessions = []; } }
   activeId = lsGet(LS_ACTIVE);
@@ -1152,7 +1171,7 @@ document.getElementById("addTrack").addEventListener("click", () => addTrack("me
 document.getElementById("newSong").addEventListener("click", () => newSong(true));
 
 // ── 트랙 고정(모든 트랙 가로 이동을 함께) ──────────────────────
-let syncScroll = lsGet("music-maker.syncScroll") === "1";
+let syncScroll = lsGet(LS_SYNC) === "1";
 let syncingScroll = false;
 function syncTracksHorizontally(sourceHscroll) {
   if (!syncScroll || syncingScroll) return;
@@ -1166,7 +1185,7 @@ function updateSyncBtn() { syncBtn.classList.toggle("active", syncScroll); }
 syncBtn.addEventListener("click", () => {
   syncScroll = !syncScroll;
   updateSyncBtn();
-  lsSet("music-maker.syncScroll", syncScroll ? "1" : "0");
+  lsSet(LS_SYNC, syncScroll ? "1" : "0");
   if (syncScroll) { // 켜는 순간 모든 트랙을 첫 트랙 위치로 맞춘다
     const first = tracks.find((t) => t._hscroll);
     if (first) syncTracksHorizontally(first._hscroll);

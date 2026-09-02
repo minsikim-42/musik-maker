@@ -1,4 +1,4 @@
-# music-maker
+# musik-maker
 
 **브라우저에서 여는 작곡(시퀀서) 앱.** 악기를 고르고 → 격자(피아노 롤)에 음표를 찍고 →
 재생하면 곡이 흘러나온다. 곡은 "세션"처럼 저장되고, 링크로 다른 기기와 공유한다.
@@ -17,8 +17,8 @@
 | 소리 엔진 | [Tone.js](https://tonejs.github.io/) 14.8.49 (CDN, `index.html`에서 로드) |
 | 파일 | `index.html`(구조) · `style.css`(디자인) · `app.js`(로직 전부, ~1800줄) |
 | 실행 | `python3 -m http.server` 후 브라우저로 접속. **빌드 없음** |
-| 라이브 | https://minsikim-42.github.io/music-maker/ (GitHub Pages, `main`/root) |
-| 원격 | https://github.com/minsikim-42/music-maker (public) |
+| 라이브 | https://minsikim-42.github.io/musik-maker/ (GitHub Pages, `main`/root) |
+| 원격 | https://github.com/minsikim-42/musik-maker (public) |
 | 저장 | 브라우저 `localStorage` (곡=세션). 서버·DB·계정 없음 |
 | 기기 간 이동 | 곡을 URL 해시에 통째로 담아 공유(자동 동기화 아님) |
 
@@ -30,7 +30,7 @@
 
 ### 로컬 실행
 ```bash
-cd music-maker
+cd musik-maker
 python3 -m http.server 8000
 # → http://localhost:8000  (첫 ▶ 재생 클릭 때 오디오가 켜진다: 브라우저 정책상 사용자 제스처 필요)
 ```
@@ -41,7 +41,7 @@ python3 -m http.server 8000
 git add -A && git commit -m "..." && git push
 ```
 - 계정 인증은 `gh`(GitHub CLI)로 로그인돼 있어야 한다(`gh auth status`로 확인).
-- Pages 상태: `gh api repos/<owner>/music-maker/pages/builds/latest --jq '.status'` (`built`면 완료).
+- Pages 상태: `gh api repos/<owner>/musik-maker/pages/builds/latest --jq '.status'` (`built`면 완료).
 - **배포 전 반드시 `index.html`의 `?v=N`(app.js·style.css)을 올릴 것**(캐시. 아래 함정 참고).
 
 ### 검증 방법 (이 프로젝트의 원칙)
@@ -111,7 +111,7 @@ git add -A && git commit -m "..." && git push
 
 ### 세션 (곡 하나)
 ```js
-{ id, name, updatedAt, data }   // localStorage 키 "music-maker.sessions" 배열. 활성 id는 "music-maker.activeId"
+{ id, name, updatedAt, data }   // localStorage 키 "musik-maker.sessions" 배열. 활성 id는 "musik-maker.activeId"
 ```
 `data` = 곡 내용(저장·공유 대상):
 ```js
