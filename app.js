@@ -222,14 +222,12 @@ function createVoices(track, out) {
     return { kind: "melody", poly: silent, vol };
   }
   if (snd) {
-    // 신스 소리: 사용자가 만든 음색. 로우패스 필터로 컷오프까지 조절.
-    const filt = new Tone.Filter(snd.cutoff, "lowpass").connect(vol);
-    const poly = new Tone.PolySynth(Tone.Synth, {
-      oscillator: { type: snd.wave },
-      envelope: { attack: snd.attack, decay: snd.decay, sustain: snd.sustain, release: snd.release },
-    }).connect(filt);
+    // 신스 소리: 사용자가 만든 음색. MonoSynth로 필터(공명)+필터엔벨로프를 내장으로 얻고,
+    // 뒤에 이펙트 체인(디스토션·비트크러셔·코러스·비브라토·트레모로)을 단다.
+    const poly = new Tone.PolySynth(Tone.MonoSynth, monoSynthOpts(snd));
     poly.volume.value = snd.volume;
-    return { kind: "melody", poly, filt, vol };
+    const fx = buildFxChain(poly, snd, vol);
+    return { kind: "melody", poly, fx, vol };
   }
 
   // 모든 악기는 PolySynth(Tone.Synth) 기반(화음 가능). PluckSynth/NoiseSynth는 Monophonic이 아니라
@@ -281,19 +279,66 @@ function buildSynth(track) {
   return createVoices(track);
 }
 
-// 커스텀 음색 기본값
+// 커스텀 음색 기본값. 새 필드는 모두 0/중립값이라, 예전에 만든 소리는 소리가 그대로 유지된다.
 function defaultParams() {
-  return { wave: "sawtooth", attack: 0.01, decay: 0.2, sustain: 0.4, release: 0.6, cutoff: 2000, volume: -8 };
+  return {
+    wave: "sawtooth", attack: 0.01, decay: 0.2, sustain: 0.4, release: 0.6,
+    cutoff: 2000, volume: -8,
+    // 필터
+    filterType: "lowpass", resonance: 1, filterEnvAmount: 0, filterDecay: 0.3,
+    // 두께(유니즌 디튠, 0=끔)
+    detune: 0,
+    // 이펙트 (0=끔)
+    distortion: 0, bitcrush: 0, chorus: 0,
+    // 모듈레이션 (0=끔)
+    vibrato: 0, tremolo: 0,
+  };
+}
+const FILTER_TYPES = [["lowpass", "로우패스 (두껍게)"], ["highpass", "하이패스 (얇게)"], ["bandpass", "밴드패스 (가운데)"]];
+// 커스텀 소리 → Tone.MonoSynth 옵션. detune>0면 fat 오실레이터(유니즌)로 두껍게.
+function synthOscOpts(s) {
+  const det = s.detune ?? 0;
+  return det > 0 ? { type: "fat" + s.wave, count: 3, spread: det } : { type: s.wave };
+}
+function monoSynthOpts(s) {
+  return {
+    oscillator: synthOscOpts(s),
+    envelope: { attack: s.attack, decay: s.decay, sustain: s.sustain, release: s.release },
+    filter: { type: s.filterType || "lowpass", Q: s.resonance ?? 1, rolloff: -12 },
+    // 필터 엔벨로프: octaves=0이면 컷오프가 고정(=예전 동작), >0면 소리 나는 동안 밝기가 열림
+    filterEnvelope: {
+      attack: 0.01, decay: s.filterDecay ?? 0.3, sustain: 0.35, release: s.release,
+      baseFrequency: s.cutoff ?? 2000, octaves: s.filterEnvAmount ?? 0, exponent: 2,
+    },
+  };
+}
+// 이펙트 체인 노드 5개를 만들어 poly 뒤에 잇는다(항상 존재, 값 0이면 사실상 통과).
+// 반환: {vib, dist, crush, chorus, trem} — 값 갱신·해제에 쓴다.
+function buildFxChain(poly, s, out) {
+  const vib = new Tone.Vibrato({ frequency: 5.5, depth: s.vibrato ?? 0 });
+  const dist = new Tone.Distortion(0.6); dist.wet.value = s.distortion ?? 0;
+  const crush = new Tone.BitCrusher({ bits: 4 }); crush.wet.value = s.bitcrush ?? 0;
+  const chorus = new Tone.Chorus({ frequency: 2.2, delayTime: 3.2, depth: 0.7, wet: s.chorus ?? 0 }).start();
+  const trem = new Tone.Tremolo({ frequency: 6, depth: s.tremolo ?? 0 }).start();
+  poly.chain(vib, dist, crush, chorus, trem, out);
+  return { vib, dist, crush, chorus, trem };
+}
+function applyFxValues(fx, s) {
+  fx.vib.depth.value = s.vibrato ?? 0;
+  fx.dist.wet.value = s.distortion ?? 0;
+  fx.crush.wet.value = s.bitcrush ?? 0;
+  fx.chorus.wet.value = s.chorus ?? 0;
+  fx.trem.depth.value = s.tremolo ?? 0;
 }
 // 소리를 편집할 때: 그 소리를 쓰는 트랙 신스에 즉시 반영(재생성 없이)
 function applyParamsLive(track) {
   const s = track.synth;
   if (!s || s.kind !== "melody" || !s.poly.set) return;
   const p = trackSound(track);
-  if (!p) return;
-  s.poly.set({ oscillator: { type: p.wave }, envelope: { attack: p.attack, decay: p.decay, sustain: p.sustain, release: p.release } });
+  if (!p || p.kind === "sample") return;
+  s.poly.set(monoSynthOpts(p));
   s.poly.volume.value = p.volume;
-  if (s.filt) s.filt.frequency.value = p.cutoff;
+  if (s.fx) applyFxValues(s.fx, p);
 }
 // 소리 하나를 편집하면 그 소리를 쓰는 모든 트랙에 반영
 function applySoundToTracks(sound) {
@@ -303,7 +348,11 @@ function applySoundToTracks(sound) {
 function disposeSynth(s) {
   if (!s) return;
   if (s.kind === "drums") { s.snareOut.dispose(); s.hatOut.dispose(); }
-  else { s.poly.dispose(); if (s.filt) s.filt.dispose(); }
+  else {
+    s.poly.dispose();
+    if (s.filt) s.filt.dispose();
+    if (s.fx) for (const k in s.fx) { try { s.fx[k].dispose(); } catch (e) {} }
+  }
   const rv = s.vol && s.vol._reverb;
   if (s.vol) s.vol.dispose();
   if (rv) rv.dispose();
@@ -1612,6 +1661,7 @@ function openSoundEditor(sound) {
   intro.textContent = "슬라이더를 움직이면 이 소리를 쓰는 트랙에 바로 반영됩니다. 미리듣기로 확인하세요.";
   modalBody.appendChild(intro);
 
+  section("기본");
   const waveRow = document.createElement("div");
   waveRow.className = "wave-row";
   for (const w of WAVE_LIST) {
@@ -1626,14 +1676,34 @@ function openSoundEditor(sound) {
     });
     waveRow.appendChild(b);
   }
-  addField("파형", waveRow);
+  addField("파형", waveRow, "소리의 기본 재질이에요. 사인=부드럽고 순함, 삼각=살짝 부드러움, 사각=속 빈 레트로, 톱니=밝고 꽉 찬 소리.");
 
-  slider("어택 (시작 빠르기)", "attack", 0, 2, 0.005, "s", (v) => v.toFixed(3));
-  slider("디케이 (감쇠)", "decay", 0, 2, 0.005, "s", (v) => v.toFixed(3));
-  slider("서스테인 (지속 크기)", "sustain", 0, 1, 0.01, "", (v) => v.toFixed(2));
-  slider("릴리스 (여운)", "release", 0, 3, 0.01, "s", (v) => v.toFixed(2));
-  slider("컷오프 (밝기)", "cutoff", 200, 8000, 10, "Hz", (v) => Math.round(v));
-  slider("볼륨", "volume", -30, 0, 1, "dB", (v) => Math.round(v));
+  slider("어택 (시작 빠르기)", "attack", 0, 2, 0.005, "s", (v) => v.toFixed(3), "건반을 누른 순간부터 소리가 최대로 커지기까지 걸리는 시간. 짧으면 '탁' 치고, 길면 '스르륵' 부풀어 올라요.");
+  slider("디케이 (감쇠)", "decay", 0, 2, 0.005, "s", (v) => v.toFixed(3), "최대로 커진 뒤 아래 '서스테인' 크기까지 줄어드는 시간.");
+  slider("서스테인 (지속 크기)", "sustain", 0, 1, 0.01, "", (v) => v.toFixed(2), "건반을 누르고 있는 동안 유지되는 소리 크기.");
+  slider("릴리스 (여운)", "release", 0, 3, 0.01, "s", (v) => v.toFixed(2), "건반을 뗀 뒤 소리가 사라지기까지의 여운.");
+
+  section("필터 (밝기·질감)");
+  dropdown("필터 종류", "filterType", FILTER_TYPES, "어느 쪽 주파수를 통과시킬지. 로우패스=낮은 쪽만(두껍고 둥글게), 하이패스=높은 쪽만(얇고 가늘게), 밴드패스=가운데만(코맹맹이).");
+  slider("컷오프 (밝기)", "cutoff", 200, 8000, 10, "Hz", (v) => Math.round(v), "필터가 잘라내기 시작하는 지점. 낮추면 어둡고 먹먹, 높이면 밝고 선명해져요.");
+  slider("공명 (Resonance)", "resonance", 0.5, 12, 0.1, "", (v) => v.toFixed(1), "컷오프 지점을 뾰족하게 강조해요. 올리면 '삑/뿅' 하는 개성 있는 울림(너무 높이면 삑사리).");
+  slider("필터 움직임", "filterEnvAmount", 0, 6, 0.1, "oct", (v) => v.toFixed(1), "소리 나는 동안 밝기(컷오프)가 저절로 위로 열려요. 올리면 뜯을 때 '와우/반짝' 하는 신스 특유의 움직임. 0이면 안 움직임.");
+  slider("필터 속도", "filterDecay", 0.02, 1.5, 0.01, "s", (v) => v.toFixed(2), "위 '필터 움직임'이 열렸다 닫히는 빠르기. 짧으면 '뾰옹' 빠르게, 길면 천천히 어두워져요.");
+
+  section("두께");
+  slider("두께 (디튠)", "detune", 0, 60, 1, "", (v) => Math.round(v), "같은 소리를 살짝 음정 어긋나게 여러 겹 겹쳐 두툼하게. 올리면 넓고 꽉 찬 '슈퍼소우' 느낌. 0이면 홑겹.");
+
+  section("이펙트");
+  slider("디스토션", "distortion", 0, 1, 0.01, "", (v) => v.toFixed(2), "일부러 찌그러뜨려 거칠고 강한 톤으로. 록/일렉 기타 같은 거친 질감. 0이면 끔.");
+  slider("비트크러셔", "bitcrush", 0, 1, 0.01, "", (v) => v.toFixed(2), "소리 해상도를 낮춰 8비트 게임기 같은 레트로·로파이 느낌. 0이면 끔.");
+  slider("코러스", "chorus", 0, 1, 0.01, "", (v) => v.toFixed(2), "미세하게 어긋난 복사본을 겹쳐 넓고 몽환적으로. 공간이 넓어진 느낌. 0이면 끔.");
+
+  section("흔들림 (모듈레이션)");
+  slider("비브라토", "vibrato", 0, 1, 0.01, "", (v) => v.toFixed(2), "음정이 규칙적으로 위아래로 살짝 떨려요(성악가의 바이브레이션). 0이면 끔.");
+  slider("트레모로", "tremolo", 0, 1, 0.01, "", (v) => v.toFixed(2), "볼륨이 규칙적으로 커졌다 작아졌다 떨려요(빠른 '와와와'). 0이면 끔.");
+
+  section("");
+  slider("볼륨", "volume", -30, 0, 1, "dB", (v) => Math.round(v), "이 소리의 크기.");
 
   const btnRow = document.createElement("div");
   btnRow.className = "share-row";
@@ -1654,48 +1724,80 @@ function openSoundEditor(sound) {
 
   modal.hidden = false;
 
-  function addField(label, control) {
-    const wrap = document.createElement("label");
+  function section(title) {
+    const h = document.createElement("div");
+    h.className = "synth-section";
+    h.textContent = title;
+    if (!title) h.classList.add("blank");
+    modalBody.appendChild(h);
+  }
+  // help가 있으면 라벨 옆에 ? 버튼을 달고, 누르면 아래로 설명이 펼쳐진다.
+  function addField(label, control, help) {
+    const wrap = document.createElement("div");
     wrap.className = "synth-field";
     const head = document.createElement("div");
     head.className = "synth-label";
-    head.textContent = label;
-    wrap.appendChild(head);
+    const txt = document.createElement("span");
+    txt.textContent = label;
+    head.appendChild(txt);
+    if (help) {
+      const q = document.createElement("button");
+      q.type = "button"; q.className = "help-btn"; q.textContent = "?";
+      q.setAttribute("aria-label", label + " 설명");
+      const tip = document.createElement("div");
+      tip.className = "synth-help"; tip.textContent = help; tip.hidden = true;
+      q.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); tip.hidden = !tip.hidden; });
+      head.appendChild(q);
+      wrap.appendChild(head);
+      wrap.appendChild(tip);
+    } else {
+      wrap.appendChild(head);
+    }
     wrap.appendChild(control);
     modalBody.appendChild(wrap);
   }
-  function slider(label, key, min, max, step, unit, fmt) {
+  function slider(label, key, min, max, step, unit, fmt, help) {
     const control = document.createElement("div");
     control.className = "synth-slider";
     const input = document.createElement("input");
     input.type = "range";
     input.min = min; input.max = max; input.step = step;
-    input.value = sound[key];
+    input.value = sound[key] ?? min;
     const val = document.createElement("span");
     val.className = "synth-val";
-    val.textContent = fmt(sound[key]) + unit;
+    const show = () => { val.textContent = fmt(Number(input.value)) + unit; };
+    show();
     input.addEventListener("input", () => {
       sound[key] = Number(input.value);
-      val.textContent = fmt(sound[key]) + unit;
+      show();
       applySoundToTracks(sound); markDirty();
     });
     control.appendChild(input);
     control.appendChild(val);
-    addField(label, control);
+    addField(label, control, help);
+  }
+  function dropdown(label, key, opts, help) {
+    const sel = document.createElement("select");
+    for (const [v, t] of opts) {
+      const o = document.createElement("option"); o.value = v; o.textContent = t;
+      if ((sound[key] ?? opts[0][0]) === v) o.selected = true;
+      sel.appendChild(o);
+    }
+    sel.addEventListener("change", () => { sound[key] = sel.value; applySoundToTracks(sound); markDirty(); playSoundPreview(sound); });
+    addField(label, sel, help);
   }
 }
 
-// 소리 미리듣기: 그 소리로 임시 신스를 만들어 짧은 코드 한 번
+// 소리 미리듣기: 그 소리로 임시 신스(+이펙트)를 만들어 짧은 코드 한 번. 실제 재생과 같은 엔진.
 async function playSoundPreview(sound) {
   await Tone.start();
-  const filt = new Tone.Filter(sound.cutoff, "lowpass").connect(realtimeMaster());
-  const poly = new Tone.PolySynth(Tone.Synth, {
-    oscillator: { type: sound.wave },
-    envelope: { attack: sound.attack, decay: sound.decay, sustain: sound.sustain, release: sound.release },
-  }).connect(filt);
+  const poly = new Tone.PolySynth(Tone.MonoSynth, monoSynthOpts(sound));
   poly.volume.value = sound.volume;
+  const fx = buildFxChain(poly, sound, realtimeMaster());
   poly.triggerAttackRelease(["C4", "E4", "G4"], "8n");
-  setTimeout(() => { poly.dispose(); filt.dispose(); }, 1500);
+  setTimeout(() => {
+    try { poly.dispose(); for (const k in fx) fx[k].dispose(); } catch (e) {}
+  }, 1800);
 }
 
 // ── 오디오 샘플 소리 편집기 ────────────────────────────────────
