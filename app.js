@@ -21,12 +21,13 @@ const DEFAULT_TOP_NOTE = "C5"; // 기본으로 보이는 맨 윗줄(예전 화�
 const DRUM_ROWS = ["하이햇", "스네어", "킥"];
 const isSharp = (n) => n.includes("#");
 
-const STEPS_PER_BAR = 16;
-
 // ── 현재 편집 중인 곡의 런타임 상태 ─────────────────────────────
+// 박자 = n×m: 한 박 = beatUnit칸(얕은 선), 한 마디 = barBeats박(굵은 선). 셀 타이밍(16분음표)은 그대로.
 let bars = 2;
-let steps = bars * STEPS_PER_BAR;
-let beatUnit = 4;   // 박자: 몇 칸마다 얕은 구분선을 그릴지(예: 3 → 3칸마다). 셀 타이밍(16분음표)은 그대로.
+let beatUnit = 4;   // n: 한 박이 몇 칸인지
+let barBeats = 4;   // m: 한 마디에 몇 박인지
+const barCells = () => beatUnit * barBeats; // 한 마디 = 몇 칸
+let steps = bars * barCells();
 let trackSeq = 0;
 const tracks = []; // { id, type, instrument, name, muted, grid, synth, cellEls }
 
@@ -487,7 +488,7 @@ function startTrackRename(head, nameSpan, renBtn, track) {
 }
 
 function resizeAll() {
-  steps = bars * STEPS_PER_BAR;
+  steps = bars * barCells();
   for (const t of tracks) {
     for (let r = 0; r < t.grid.length; r++) {
       const row = t.grid[r];
@@ -682,7 +683,9 @@ function renderTrack(track) {
       cell.className = "cell";
       if (track.type === "drums") cell.classList.add("drum");
       else if (isSharp(rowName)) cell.classList.add("black-key");
-      if (c % beatUnit === 0) cell.classList.add("beat"); // 박자 구분선(N칸마다)
+      // 마디선(굵게, barCells칸마다)이 박자선(얕게, beatUnit칸마다)보다 우선
+      if (c % barCells() === 0) cell.classList.add("bar");
+      else if (c % beatUnit === 0) cell.classList.add("beat");
       if (track.grid[r][c]) cell.classList.add("on");
       cell._r = r; cell._c = c; cell._track = track; // 탭 위임·이동 모드에서 좌표/트랙 조회
       grid.appendChild(cell);
@@ -784,6 +787,7 @@ function enableCellTap(grid, track) {
     if (r == null || c == null) return;
     track.grid[r][c] = !track.grid[r][c];
     cell.classList.toggle("on", track.grid[r][c]);
+    if (!playing) setPlayhead(c); // 클릭한 칸의 위치를 상단 플레이바(n마디n박)·핸들에 표시
     // pointerup은 사용자 제스처 → 오디오 컨텍스트를 켠 뒤 미리듣기(첫 음 무음 방지).
     if (track.grid[r][c]) { await Tone.start(); preview(track, r); }
     markDirty();
@@ -1013,8 +1017,9 @@ const tlHandle = document.getElementById("tlHandle");
 const tlPos = document.getElementById("tlPos");
 
 function stepToPos(step) {
-  const bar = Math.floor(step / STEPS_PER_BAR) + 1;
-  const beat = Math.floor((step % STEPS_PER_BAR) / beatUnit) + 1; // 박자 = beatUnit칸
+  const bc = barCells();
+  const bar = Math.floor(step / bc) + 1;
+  const beat = Math.floor((step % bc) / beatUnit) + 1; // 한 박 = beatUnit칸, 한 마디 = bc칸
   return `${bar}마디 ${beat}박`;
 }
 let prevPlayheadCol = -1;
@@ -1106,6 +1111,7 @@ function serialize() {
     bpm: Number(bpm.value),
     bars,
     beatUnit,
+    barBeats,
     sounds: soundLib.map((s) => ({ ...s })), // 커스텀 소리 라이브러리
     tracks: tracks.map((t) => ({
       type: t.type,
@@ -1132,9 +1138,11 @@ function deserialize(data) {
   for (const s of soundLib) loadSampleBuffer(s); // 오디오 샘플은 미리 디코드
 
   bars = data.bars || 2;
-  steps = bars * STEPS_PER_BAR;
   beatUnit = data.beatUnit || 4;
+  barBeats = data.barBeats || 4;
+  steps = bars * barCells();
   if (beatInput) beatInput.value = beatUnit;
+  if (barInput) barInput.value = barBeats;
   updateFooterHint();
   setBpm(data.bpm || 120, { silent: true }); // 곡 로드 시 템포 반영(저장 유발 안 함)
 
@@ -1151,6 +1159,7 @@ function freshSongData() {
     bpm: 120,
     bars: 2,
     beatUnit: 4,
+    barBeats: 4,
     sounds: [],
     tracks: [
       { type: "melody", instrument: "piano", name: "트랙 1", muted: false, grid: null },
@@ -1354,22 +1363,39 @@ const songNameEl = document.getElementById("songName");
 
 // 박자: 몇 칸마다 얕은 구분선을 그릴지. 바꾸면 격자 다시 그리고 안내문 갱신.
 const beatInput = document.getElementById("beatNum");
+const barInput = document.getElementById("barNum");
 function updateFooterHint() {
   const el = document.getElementById("gridHint");
-  if (el) el.textContent = `가로 = 시간(왼→오), 세로 = 음 높이 / 드럼 종류 · ${beatUnit}칸마다 얕은 선(박자)`;
+  if (el) el.textContent = `가로 = 시간(왼→오), 세로 = 음 높이 / 드럼 종류 · 한 박=${beatUnit}칸(얕은 선), 한 마디=${barBeats}박(굵은 선)`;
+}
+// 박(n) 또는 마디당 박수(m) 변경 → 마디 칸 수(barCells)가 바뀌므로 격자 길이도 다시 맞춘다(resizeAll).
+// 마디 칸 수가 바뀌면 전체 길이(칸)를 최대한 유지하도록 마디 수(bars)를 다시 잡은 뒤 리사이즈한다.
+function applyMeterChange() {
+  bars = Math.max(1, Math.round(steps / barCells()));
+  resizeAll();
+  updateFooterHint();
 }
 function setBeatUnit(v, opts = {}) {
-  v = Math.max(2, Math.min(12, Math.round(Number(v) || 4)));
+  v = Math.max(1, Math.min(12, Math.round(Number(v) || 4)));
   beatUnit = v;
   if (beatInput && !opts.keepInput) beatInput.value = String(v);
-  render();            // 격자를 다시 그려 구분선 위치 반영
-  updateFooterHint();
-  if (!opts.silent) markDirty();
+  applyMeterChange();
+}
+function setBarBeats(v, opts = {}) {
+  v = Math.max(1, Math.min(16, Math.round(Number(v) || 4)));
+  barBeats = v;
+  if (barInput && !opts.keepInput) barInput.value = String(v);
+  applyMeterChange();
 }
 if (beatInput) {
   beatInput.value = String(beatUnit);
-  beatInput.addEventListener("input", () => { const n = Number(beatInput.value); if (n >= 2 && n <= 12) setBeatUnit(n, { keepInput: true }); });
+  beatInput.addEventListener("input", () => { const n = Number(beatInput.value); if (n >= 1 && n <= 12) setBeatUnit(n, { keepInput: true }); });
   beatInput.addEventListener("change", () => setBeatUnit(beatInput.value));
+}
+if (barInput) {
+  barInput.value = String(barBeats);
+  barInput.addEventListener("input", () => { const n = Number(barInput.value); if (n >= 1 && n <= 16) setBarBeats(n, { keepInput: true }); });
+  barInput.addEventListener("change", () => setBarBeats(barInput.value));
 }
 
 // 노트 이동 모드 툴바(진입 버튼은 트랙마다 있음). 확인/취소·화살표는 활성 트랙에 작용.
@@ -1440,9 +1466,8 @@ async function playFrom(fromStep, opts = {}) {
   setPlayhead(N);
   playing = true;
   seq.start("+0.06");                 // 첫 이벤트를 살짝 뒤로 → 시작 순간 '과거 시각' 스케줄 경고 방지
-  // Transport를 시작 위치(N 16분음표)에서 켠다 → 그 스텝부터 재생
-  const pos = `${Math.floor(N / STEPS_PER_BAR)}:${Math.floor((N % STEPS_PER_BAR) / 4)}:${N % 4}`;
-  Tone.Transport.start("+0.05", pos);
+  // 시작 위치 = N번째 16분음표(초 단위). 시각 격자(마디/박)와 무관하게 셀은 항상 16분음표다.
+  Tone.Transport.start("+0.05", N * Tone.Time("16n").toSeconds());
   updateTransportButtons();
 }
 btnPlayStart.addEventListener("click", () => playFrom(0));                        // 처음부터(재생 중이면 일시정지)
@@ -1657,7 +1682,7 @@ function decodeShare(code) {
   const name = readName();
   const bpm = b[i++];
   const bars = b[i++];
-  const steps = bars * STEPS_PER_BAR;
+  const steps = bars * 16; // 공유 코덱은 4/4·16칸 마디를 가정(박자 n×m은 링크에 안 담김)
   // 멜로디 줄 수: v4부터 음역이 넓어졌다(37줄). 그 전 링크는 13줄로 읽고 makeTrackObj가 음이름으로 옮긴다.
   const melodyRows = ver >= 4 ? MELODY_NOTES.length : LEGACY_MELODY_NOTES.length;
 

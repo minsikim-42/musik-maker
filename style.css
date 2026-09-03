@@ -414,7 +414,8 @@ button.primary { background: var(--accent); color: #0b1020; font-weight: 600; bo
   -webkit-touch-callout: none;
 }
 .cell.black-key { background: var(--black-key); }
-.cell.beat { box-shadow: inset 2px 0 0 #2f3442; }
+.cell.beat { box-shadow: inset 2px 0 0 #2f3442; }          /* 박자: 얕은 선 */
+.cell.bar { box-shadow: inset 3px 0 0 #59617a; }           /* 마디: 조금 더 굵고 밝은 선 */
 .cell.on { background: var(--on); }
 .cell.on.drum { background: var(--on-drum); }
 /* 이동 모드: 활성 트랙만 스크롤 대신 선택/이동. 선택 범위는 강조 테두리 */
