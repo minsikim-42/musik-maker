@@ -26,6 +26,7 @@ const STEPS_PER_BAR = 16;
 // ── 현재 편집 중인 곡의 런타임 상태 ─────────────────────────────
 let bars = 2;
 let steps = bars * STEPS_PER_BAR;
+let beatUnit = 4;   // 박자: 몇 칸마다 얕은 구분선을 그릴지(예: 3 → 3칸마다). 셀 타이밍(16분음표)은 그대로.
 let trackSeq = 0;
 const tracks = []; // { id, type, instrument, name, muted, grid, synth, cellEls }
 
@@ -668,7 +669,7 @@ function renderTrack(track) {
       cell.className = "cell";
       if (track.type === "drums") cell.classList.add("drum");
       else if (isSharp(rowName)) cell.classList.add("black-key");
-      if (c % 4 === 0) cell.classList.add("beat");
+      if (c % beatUnit === 0) cell.classList.add("beat"); // 박자 구분선(N칸마다)
       if (track.grid[r][c]) cell.classList.add("on");
       cell._r = r; cell._c = c; // 탭 위임(enableCellTap)에서 좌표 조회
       grid.appendChild(cell);
@@ -807,7 +808,7 @@ const tlPos = document.getElementById("tlPos");
 
 function stepToPos(step) {
   const bar = Math.floor(step / STEPS_PER_BAR) + 1;
-  const beat = Math.floor((step % STEPS_PER_BAR) / 4) + 1;
+  const beat = Math.floor((step % STEPS_PER_BAR) / beatUnit) + 1; // 박자 = beatUnit칸
   return `${bar}마디 ${beat}박`;
 }
 let prevPlayheadCol = -1;
@@ -898,6 +899,7 @@ function serialize() {
   return {
     bpm: Number(bpm.value),
     bars,
+    beatUnit,
     sounds: soundLib.map((s) => ({ ...s })), // 커스텀 소리 라이브러리
     tracks: tracks.map((t) => ({
       type: t.type,
@@ -925,6 +927,9 @@ function deserialize(data) {
 
   bars = data.bars || 2;
   steps = bars * STEPS_PER_BAR;
+  beatUnit = data.beatUnit || 4;
+  if (beatInput) beatInput.value = beatUnit;
+  updateFooterHint();
   setBpm(data.bpm || 120, { silent: true }); // 곡 로드 시 템포 반영(저장 유발 안 함)
 
   for (const td of data.tracks || []) tracks.push(makeTrackObj(td.type, td));
@@ -939,6 +944,7 @@ function freshSongData() {
   return {
     bpm: 120,
     bars: 2,
+    beatUnit: 4,
     sounds: [],
     tracks: [
       { type: "melody", instrument: "piano", name: "트랙 1", muted: false, grid: null },
@@ -1139,6 +1145,26 @@ function escapeHtml(str) {
 const bpm = document.getElementById("bpm");
 const bpmNum = document.getElementById("bpmNum");
 const songNameEl = document.getElementById("songName");
+
+// 박자: 몇 칸마다 얕은 구분선을 그릴지. 바꾸면 격자 다시 그리고 안내문 갱신.
+const beatInput = document.getElementById("beatNum");
+function updateFooterHint() {
+  const el = document.getElementById("gridHint");
+  if (el) el.textContent = `가로 = 시간(왼→오), 세로 = 음 높이 / 드럼 종류 · ${beatUnit}칸마다 얕은 선(박자)`;
+}
+function setBeatUnit(v, opts = {}) {
+  v = Math.max(2, Math.min(12, Math.round(Number(v) || 4)));
+  beatUnit = v;
+  if (beatInput && !opts.keepInput) beatInput.value = String(v);
+  render();            // 격자를 다시 그려 구분선 위치 반영
+  updateFooterHint();
+  if (!opts.silent) markDirty();
+}
+if (beatInput) {
+  beatInput.value = String(beatUnit);
+  beatInput.addEventListener("input", () => { const n = Number(beatInput.value); if (n >= 2 && n <= 12) setBeatUnit(n, { keepInput: true }); });
+  beatInput.addEventListener("change", () => setBeatUnit(beatInput.value));
+}
 
 // 곡 길이(마디) 조절 — 트랙 격자 오른쪽 끝 ＋/－ 버튼이 부른다. 상한 없음, 최소 1마디.
 function changeBars(delta) {

@@ -327,7 +327,7 @@ button.primary { background: var(--accent); color: #0b1020; font-weight: 600; bo
 
 /* 템포: 숫자 입력 + 슬라이더 */
 .tempo-row { display: flex; align-items: center; gap: 8px; }
-#bpmNum {
+#bpmNum, #beatNum {
   width: 60px;
   font: inherit;
   color: var(--text);
@@ -337,6 +337,7 @@ button.primary { background: var(--accent); color: #0b1020; font-weight: 600; bo
   padding: 6px 8px;
   text-align: center;
 }
+.beat-field .hint { color: var(--muted); font-size: 10px; }
 
 .grid {
   display: grid;

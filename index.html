@@ -7,7 +7,7 @@
   <!-- 소리 엔진: Tone.js (Web Audio API 위에서 악기·타이밍·재생을 다룸) -->
   <script src="https://unpkg.com/tone@14.8.49/build/Tone.js"></script>
   <!-- ?v= 는 배포마다 올린다: 브라우저·GitHub Pages 캐시로 옛 버전이 남는 것을 막는다 -->
-  <link rel="stylesheet" href="style.css?v=48" />
+  <link rel="stylesheet" href="style.css?v=49" />
 </head>
 <body>
   <!-- 왼쪽에서 밀려나오는 세션(내 곡) 목록 + 메뉴 -->
@@ -62,6 +62,10 @@
       </div>
     </label>
 
+    <label class="beat-field">박자 <span class="hint">(n칸마다 선)</span>
+      <input id="beatNum" type="number" min="2" max="12" value="4" />
+    </label>
+
     <button id="addTrack">＋ 트랙 추가</button>
     <button id="saveSong">💾 저장됨</button>
     <button id="share">🔗 공유</button>
@@ -71,7 +75,7 @@
   <main id="tracks" class="tracks"></main>
 
   <footer>
-    <span>가로 = 시간(왼→오), 세로 = 음 높이 / 드럼 종류 · 4칸마다 한 박자</span>
+    <span id="gridHint">가로 = 시간(왼→오), 세로 = 음 높이 / 드럼 종류 · 4칸마다 얕은 선(박자)</span>
   </footer>
 
   <div id="toast" class="toast" hidden></div>
@@ -87,6 +91,6 @@
     </div>
   </div>
 
-  <script src="app.js?v=48"></script>
+  <script src="app.js?v=49"></script>
 </body>
 </html>
