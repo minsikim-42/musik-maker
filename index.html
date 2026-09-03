@@ -7,7 +7,7 @@
   <!-- 소리 엔진: Tone.js (Web Audio API 위에서 악기·타이밍·재생을 다룸) -->
   <script src="https://unpkg.com/tone@14.8.49/build/Tone.js"></script>
   <!-- ?v= 는 배포마다 올린다: 브라우저·GitHub Pages 캐시로 옛 버전이 남는 것을 막는다 -->
-  <link rel="stylesheet" href="style.css?v=50" />
+  <link rel="stylesheet" href="style.css?v=51" />
 </head>
 <body>
   <!-- 왼쪽에서 밀려나오는 세션(내 곡) 목록 + 메뉴 -->
@@ -67,9 +67,23 @@
     </label>
 
     <button id="addTrack">＋ 트랙 추가</button>
+    <button id="moveBtn" title="노트 이동 모드: 드래그로 범위 선택 후 옮기기">✥ 이동</button>
     <button id="saveSong">💾 저장됨</button>
     <button id="share">🔗 공유</button>
   </section>
+
+  <!-- 이동 모드 툴바: 이동 모드일 때만 나타난다(하단 고정) -->
+  <div id="moveBar" class="move-bar" hidden>
+    <span class="move-hint">드래그로 범위 선택 → 선택 안을 다시 드래그하거나 화살표로 이동</span>
+    <div class="move-arrows">
+      <button id="mvUp" title="위로">▲</button>
+      <button id="mvLeft" title="왼쪽">◀</button>
+      <button id="mvRight" title="오른쪽">▶</button>
+      <button id="mvDown" title="아래로">▼</button>
+    </div>
+    <button id="mvConfirm" class="primary">✓ 확인</button>
+    <button id="mvCancel">✗ 취소</button>
+  </div>
 
   <!-- 트랙들이 세로로 쌓인다. JS가 채운다. -->
   <main id="tracks" class="tracks"></main>
@@ -91,6 +105,6 @@
     </div>
   </div>
 
-  <script src="app.js?v=50"></script>
+  <script src="app.js?v=51"></script>
 </body>
 </html>

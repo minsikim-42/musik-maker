@@ -671,7 +671,7 @@ function renderTrack(track) {
       else if (isSharp(rowName)) cell.classList.add("black-key");
       if (c % beatUnit === 0) cell.classList.add("beat"); // 박자 구분선(N칸마다)
       if (track.grid[r][c]) cell.classList.add("on");
-      cell._r = r; cell._c = c; // 탭 위임(enableCellTap)에서 좌표 조회
+      cell._r = r; cell._c = c; cell._track = track; // 탭 위임·이동 모드에서 좌표/트랙 조회
       grid.appendChild(cell);
       track.cellEls[r][c] = cell;
     }
@@ -721,6 +721,7 @@ function renderTrack(track) {
 function enableDragScroll(scrollEl, flagEl) {
   let st = null;
   scrollEl.addEventListener("pointerdown", (e) => {
+    if (moveMode) return;                                    // 이동 모드에선 드래그=선택/이동(스크롤 안 함)
     if (e.pointerType !== "mouse" || e.button !== 0) return; // 터치/펜은 기본 스크롤
     st = { y: e.clientY, top: scrollEl.scrollTop, moved: false };
     flagEl._dragged = false;
@@ -751,15 +752,18 @@ const TAP_SLOP = 12; // 이 픽셀 이내로 움직인 손뗌은 탭으로 본�
 function enableCellTap(grid, track) {
   let tap = null;
   grid.addEventListener("pointerdown", (e) => {
+    if (moveMode) { moveDown(e, grid, track); return; } // 이동 모드: 선택/이동 드래그 시작
     const cell = e.target.closest(".cell");
     tap = cell ? { id: e.pointerId, x: e.clientX, y: e.clientY, cell, moved: false } : null;
   });
   grid.addEventListener("pointermove", (e) => {
+    if (moveDrag && moveDrag.grid === grid) { moveMoveEv(e); return; }
     if (!tap || e.pointerId !== tap.id) return;
     if (Math.abs(e.clientX - tap.x) > TAP_SLOP || Math.abs(e.clientY - tap.y) > TAP_SLOP) tap.moved = true;
   });
   grid.addEventListener("pointercancel", () => { tap = null; }); // 스크롤 시작 등 → 탭 취소
   grid.addEventListener("pointerup", async (e) => {
+    if (moveDrag && moveDrag.grid === grid) { moveUpEv(e, grid); return; }
     if (!tap || e.pointerId !== tap.id) return;
     const t = tap; tap = null;
     if (t.moved || grid._dragged) return; // 드래그(스크롤)면 음 안 찍음
@@ -771,6 +775,144 @@ function enableCellTap(grid, track) {
     if (track.grid[r][c]) { await Tone.start(); preview(track, r); }
     markDirty();
   });
+}
+
+// ══════════════════════════════════════════════════════════════
+//  노트 이동 모드 — 사각 범위 선택 → 드래그/화살표로 이동, 확인/취소로 종료
+// ══════════════════════════════════════════════════════════════
+// 모델: 선택하면 그 사각 안의 '켜진 노트'를 들어올리고(notes), 원본에서 지운 격자를 base로 둔다.
+// 이동할 때마다 track.grid = base + notes를 (r,c) 위치에 다시 찍는다 → 격자가 바로 갱신돼 재생도 옮긴 대로 난다.
+let moveMode = false;
+let moveSel = null;   // { track, notes:[[dr,dc]], h, w, r, c, base }
+let moveDrag = null;  // { mode:'select'|'move', grid, track, id, ... }
+let moveSnapshot = null; // { trackId: grid 복사 } — 취소 복원용
+const clampi = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+const trackRowCount = (t) => (t.type === "drums" ? DRUM_ROWS : MELODY_NOTES).length;
+
+function clearMoveSelClasses(track) {
+  if (!track.cellEls) return;
+  for (const row of track.cellEls) for (const el of row) if (el) el.classList.remove("move-sel");
+}
+function paintSelRect(track, r0, c0, r1, c1) {
+  clearMoveSelClasses(track);
+  const ra = Math.min(r0, r1), rb = Math.max(r0, r1), ca = Math.min(c0, c1), cb = Math.max(c0, c1);
+  for (let r = ra; r <= rb; r++) for (let c = ca; c <= cb; c++) {
+    const el = track.cellEls[r] && track.cellEls[r][c];
+    if (el) el.classList.add("move-sel");
+  }
+}
+function refreshTrackCells(t) {
+  if (!t.cellEls) return;
+  for (let r = 0; r < t.cellEls.length; r++) for (let c = 0; c < steps; c++) {
+    const el = t.cellEls[r] && t.cellEls[r][c];
+    if (el) el.classList.toggle("on", !!t.grid[r][c]);
+  }
+}
+// 들어올린 블록을 base 위에 현재 (r,c)로 다시 찍는다(격자 데이터 갱신 → 재생 반영).
+function stampBlock() {
+  if (!moveSel) return;
+  const t = moveSel.track, g = t.grid, base = moveSel.base;
+  for (let r = 0; r < g.length; r++) for (let c = 0; c < g[r].length; c++) g[r][c] = base[r][c];
+  for (const [dr, dc] of moveSel.notes) {
+    const rr = moveSel.r + dr, cc = moveSel.c + dc;
+    if (rr >= 0 && rr < g.length && cc >= 0 && cc < steps) g[rr][cc] = true; // 겹치면 덮어씀(합쳐짐)
+  }
+  refreshTrackCells(t);
+  paintSelRect(t, moveSel.r, moveSel.c, moveSel.r + moveSel.h - 1, moveSel.c + moveSel.w - 1);
+}
+function finalizeSelection(d) {
+  const r0 = Math.min(d.r0, d.r1), r1 = Math.max(d.r0, d.r1);
+  const c0 = Math.min(d.c0, d.c1), c1 = Math.max(d.c0, d.c1);
+  const t = d.track, notes = [];
+  const base = t.grid.map((row) => row.slice());
+  for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) {
+    if (t.grid[r][c]) { notes.push([r - r0, c - c0]); base[r][c] = false; }
+  }
+  moveSel = { track: t, notes, h: r1 - r0 + 1, w: c1 - c0 + 1, r: r0, c: c0, base };
+  stampBlock();
+}
+function cellAt(x, y, track) {
+  const el = document.elementFromPoint(x, y);
+  const cell = el && el.closest ? el.closest(".cell") : null;
+  return (cell && cell._track === track && cell._r != null) ? { r: cell._r, c: cell._c } : null;
+}
+function moveDown(e, grid, track) {
+  const cell = e.target.closest(".cell");
+  if (!cell || cell._r == null) return;
+  e.preventDefault();
+  try { grid.setPointerCapture(e.pointerId); } catch (x) {}
+  const r = cell._r, c = cell._c;
+  const inBlock = moveSel && moveSel.track === track &&
+    r >= moveSel.r && r < moveSel.r + moveSel.h && c >= moveSel.c && c < moveSel.c + moveSel.w;
+  if (inBlock) {
+    moveDrag = { mode: "move", grid, track, id: e.pointerId, startR: r, startC: c, origR: moveSel.r, origC: moveSel.c };
+  } else {
+    moveSel = null; clearMoveSelClasses(track);
+    moveDrag = { mode: "select", grid, track, id: e.pointerId, r0: r, c0: c, r1: r, c1: c };
+    paintSelRect(track, r, c, r, c);
+  }
+}
+function moveMoveEv(e) {
+  if (!moveDrag || e.pointerId !== moveDrag.id) return;
+  const at = cellAt(e.clientX, e.clientY, moveDrag.track);
+  if (!at) return;
+  if (moveDrag.mode === "select") {
+    moveDrag.r1 = at.r; moveDrag.c1 = at.c;
+    paintSelRect(moveDrag.track, moveDrag.r0, moveDrag.c0, moveDrag.r1, moveDrag.c1);
+  } else {
+    const rows = trackRowCount(moveDrag.track);
+    moveSel.r = clampi(moveDrag.origR + (at.r - moveDrag.startR), 0, rows - moveSel.h);
+    moveSel.c = clampi(moveDrag.origC + (at.c - moveDrag.startC), 0, steps - moveSel.w);
+    stampBlock();
+    markDirty();
+  }
+}
+function moveUpEv(e, grid) {
+  if (!moveDrag || e.pointerId !== moveDrag.id) return;
+  try { grid.releasePointerCapture(e.pointerId); } catch (x) {}
+  if (moveDrag.mode === "select") finalizeSelection(moveDrag);
+  moveDrag = null;
+}
+function moveNudge(dr, dc) {
+  if (!moveMode || !moveSel) return;
+  const rows = trackRowCount(moveSel.track);
+  moveSel.r = clampi(moveSel.r + dr, 0, rows - moveSel.h);
+  moveSel.c = clampi(moveSel.c + dc, 0, steps - moveSel.w);
+  stampBlock();
+  ensureBlockVisible();
+  markDirty();
+}
+// 화살표로 시야 밖까지 옮겨도 따라가 보이게(이동 모드는 스크롤이 꺼져 있으므로)
+function ensureBlockVisible() {
+  const t = moveSel && moveSel.track; if (!t || !t._hscroll) return;
+  const el = t.cellEls && t.cellEls[moveSel.r] && t.cellEls[moveSel.r][moveSel.c]; if (!el) return;
+  const sc = t._hscroll, cr = el.getBoundingClientRect(), sr = sc.getBoundingClientRect(), pad = 64;
+  if (cr.left < sr.left + pad) sc.scrollLeft -= (sr.left + pad - cr.left);
+  else {
+    const right = cr.left + cr.width * moveSel.w;
+    if (right > sr.right - 8) sc.scrollLeft += (right - (sr.right - 8));
+  }
+}
+function enterMoveMode() {
+  if (moveMode) return;
+  moveMode = true; moveSel = null; moveDrag = null;
+  moveSnapshot = {};
+  for (const t of tracks) moveSnapshot[t.id] = t.grid.map((row) => row.slice());
+  document.body.classList.add("move-mode");
+  if (moveBar) moveBar.hidden = false;
+  if (moveBtn) moveBtn.classList.add("active");
+}
+function exitMoveMode(commit) {
+  if (!moveMode) return;
+  if (!commit && moveSnapshot) { // 취소: 스냅샷으로 복원
+    for (const t of tracks) if (moveSnapshot[t.id]) t.grid = moveSnapshot[t.id].map((row) => row.slice());
+  }
+  moveMode = false; moveSel = null; moveDrag = null; moveSnapshot = null;
+  document.body.classList.remove("move-mode");
+  if (moveBar) moveBar.hidden = true;
+  if (moveBtn) moveBtn.classList.remove("active");
+  render(); // 격자 다시 그려 선택 표시 정리
+  if (commit) markDirty();
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -1166,6 +1308,17 @@ if (beatInput) {
   beatInput.addEventListener("input", () => { const n = Number(beatInput.value); if (n >= 2 && n <= 12) setBeatUnit(n, { keepInput: true }); });
   beatInput.addEventListener("change", () => setBeatUnit(beatInput.value));
 }
+
+// 노트 이동 모드 버튼/툴바
+const moveBtn = document.getElementById("moveBtn");
+const moveBar = document.getElementById("moveBar");
+if (moveBtn) moveBtn.addEventListener("click", () => (moveMode ? exitMoveMode(true) : enterMoveMode()));
+document.getElementById("mvConfirm")?.addEventListener("click", () => exitMoveMode(true));
+document.getElementById("mvCancel")?.addEventListener("click", () => exitMoveMode(false));
+document.getElementById("mvUp")?.addEventListener("click", () => moveNudge(-1, 0));
+document.getElementById("mvDown")?.addEventListener("click", () => moveNudge(1, 0));
+document.getElementById("mvLeft")?.addEventListener("click", () => moveNudge(0, -1));
+document.getElementById("mvRight")?.addEventListener("click", () => moveNudge(0, 1));
 
 // 곡 길이(마디) 조절 — 트랙 격자 오른쪽 끝 ＋/－ 버튼이 부른다. 상한 없음, 최소 1마디.
 function changeBars(delta) {
