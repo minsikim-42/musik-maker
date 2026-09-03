@@ -801,6 +801,7 @@ function highlightColumn(col) {
 let playheadStep = 0;   // '현재 시점' — 여기서 재생 시작. 재생 중엔 진행 위치를 따라 움직인다.
 let playing = false;
 let paused = false;   // 일시정지 상태(Transport.pause, 위치 유지). '현재' 버튼으로 이어재생.
+let pausedStep = -1;  // 일시정지한 스텝. 이어서 할 때 핸들이 이 자리 그대로면 끊김 없이, 옮겼으면 그 자리에서 새로.
 const timelineEl = document.getElementById("timeline");
 const tlFill = document.getElementById("tlFill");
 const tlHandle = document.getElementById("tlHandle");
@@ -1199,6 +1200,7 @@ function updateTransportButtons() {
 function pausePlayback() {
   Tone.Transport.pause();      // 위치를 유지한 채 멈춘다(이어재생 가능)
   playing = false; paused = true;
+  pausedStep = playheadStep;   // 이 자리를 기억 — 이어서 할 때 핸들이 여기서 벗어났는지 본다
   updateTimeline();
   updateTransportButtons();
 }
@@ -1206,15 +1208,18 @@ async function playFrom(fromStep, opts = {}) {
   if (playing) { pausePlayback(); return; } // 재생 중 재생버튼 클릭 = 일시정지(토글)
   await Tone.start();
   Tone.Transport.bpm.value = Number(bpm.value);
-  // 일시정지 상태에서 '현재(이어서)' → 위치 유지한 채 Transport만 재개
-  if (paused && opts.resume) {
+  // 일시정지 상태에서 '현재(이어서)' → 핸들이 멈췄던 자리 그대로면 끊김 없이 Transport만 재개.
+  // 핸들을 옮겼으면(마디·박 위치 변경) 이 분기를 건너뛰어 아래에서 그 위치부터 새로 시작한다.
+  if (paused && opts.resume && playheadStep === pausedStep) {
     paused = false; playing = true;
     Tone.Transport.start("+0.05");
     updateTransportButtons();
     return;
   }
-  // 새로 시작(처음부터 또는 지정 스텝부터)
+  // 새로 시작(처음부터, 또는 일시정지 중 옮긴 위치부터). 이전 상태가 paused여도 깨끗이 다시 놓는다.
   paused = false;
+  Tone.Transport.stop();
+  if (seq) seq.stop();
   rebuildSequence();
   const N = Math.max(0, Math.min(steps - 1, Math.round(fromStep)));
   setPlayhead(N);
