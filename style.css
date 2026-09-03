@@ -417,13 +417,14 @@ button.primary { background: var(--accent); color: #0b1020; font-weight: 600; bo
 .cell.beat { box-shadow: inset 2px 0 0 #2f3442; }
 .cell.on { background: var(--on); }
 .cell.on.drum { background: var(--on-drum); }
-/* 이동 모드: 스크롤 대신 선택/이동, 커서 표시. 선택 범위는 강조 테두리 */
-.move-mode .gridscroll { touch-action: none; }
-.move-mode .cell { cursor: move; }
+/* 이동 모드: 활성 트랙만 스크롤 대신 선택/이동. 선택 범위는 강조 테두리 */
+.gridscroll.move-active { touch-action: none; }
+.gridscroll.move-active .cell { cursor: move; }
 .cell.move-sel { box-shadow: inset 0 0 0 2px var(--accent); background: rgba(110, 168, 254, .20); }
 .cell.on.move-sel { background: var(--on); box-shadow: inset 0 0 0 2px var(--accent); }
 .cell.on.drum.move-sel { background: var(--on-drum); }
-#moveBtn.active { background: var(--accent); color: #0b1020; border-color: var(--accent); font-weight: 600; }
+.t-move.active { background: var(--accent); color: #0b1020; border-color: var(--accent); font-weight: 600; }
+.t-move:disabled { opacity: .4; cursor: default; }
 /* 하단 고정 이동 툴바 */
 .move-bar {
   position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%);
