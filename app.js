@@ -518,6 +518,8 @@ function render() {
   for (const track of tracks) tracksEl.appendChild(renderTrack(track));
   prevPlayheadCol = -1;         // 셀이 새로 그려졌으니 노란 열 다시 칠한다
   if (typeof markPlayheadColumn === "function") markPlayheadColumn();
+  prevEditCol = -1;             // 초록 편집 열도 다시 칠한다
+  if (typeof markEditColumn === "function") markEditColumn();
 }
 
 function renderTrack(track) {
@@ -1062,16 +1064,27 @@ const tlFill = document.getElementById("tlFill");
 const tlHandle = document.getElementById("tlHandle");
 const tlPos = document.getElementById("tlPos");
 const tlEdit = document.getElementById("tlEdit");
-const tlEditPos = document.getElementById("tlEditPos");
-// 노트 찍는(편집) 위치를 플레이바에 별도 표식으로 보여준다(재생 핸들은 안 건드림).
+// 노트 찍는(편집) 위치: 플레이바 초록 표식 + 격자에서 그 열을 옅은 초록으로 칠한다(재생 핸들은 안 건드림).
+let editCol = -1, prevEditCol = -1;
+function markEditColumn() {
+  const col = editCol;
+  for (const t of tracks) {
+    if (!t.cellEls) continue;
+    for (let r = 0; r < t.cellEls.length; r++) {
+      if (prevEditCol >= 0 && t.cellEls[r][prevEditCol]) t.cellEls[r][prevEditCol].classList.remove("edit-col");
+      if (col >= 0 && t.cellEls[r][col]) t.cellEls[r][col].classList.add("edit-col");
+    }
+  }
+  prevEditCol = col;
+}
 function showEditMarker(col) {
   const pct = steps > 0 ? (col / steps) * 100 : 0;
   if (tlEdit) { tlEdit.style.left = pct + "%"; tlEdit.hidden = false; }
-  if (tlEditPos) { tlEditPos.textContent = "✎ " + stepToPos(col); tlEditPos.hidden = false; }
+  editCol = col; markEditColumn();
 }
 function hideEditMarker() {
   if (tlEdit) tlEdit.hidden = true;
-  if (tlEditPos) tlEditPos.hidden = true;
+  editCol = -1; markEditColumn();
 }
 
 function stepToPos(step) {

@@ -101,13 +101,6 @@ body {
   background: #34d399;
   pointer-events: none;
 }
-.tl-editpos {
-  font-size: 12px;
-  color: #34d399;
-  min-width: 82px;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
 #syncScroll.active {
   background: var(--accent);
   color: #0b1020;
@@ -470,6 +463,10 @@ button.primary { background: var(--accent); color: #0b1020; font-weight: 600; bo
 /* 켜진 칸이 현재열일 때: 노트 색을 그대로 두고(가려지지 않게) 노란 테두리만 덧입힌다 */
 .cell.on.playhead-col { background: var(--on); box-shadow: inset 0 0 0 2px var(--playhead); }
 .cell.on.drum.playhead-col { background: var(--on-drum); }
+/* 마지막으로 클릭/편집한 열 — 옅은 초록 칠(재생 위치와 비슷하되 색만 초록) */
+.cell.edit-col { background: rgba(52, 211, 153, .16); }
+.cell.on.edit-col { background: var(--on); }        /* 노트 색은 유지 */
+.cell.on.drum.edit-col { background: var(--on-drum); }
 
 footer { margin-top: 14px; color: var(--muted); font-size: 12px; }
 
