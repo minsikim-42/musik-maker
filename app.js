@@ -878,12 +878,17 @@ function applyDragAt(x, y) {
     moveDrag.r1 = at.r; moveDrag.c1 = at.c;
     paintSelRect(mvTrack, moveDrag.r0, moveDrag.c0, at.r, at.c);
   } else {
-    const rows = trackRowCount(mvTrack);
-    moveSel.r = clampi(moveDrag.origR + (at.r - moveDrag.startR), 0, rows - moveSel.h);
-    moveSel.c = clampi(moveDrag.origC + (at.c - moveDrag.startC), 0, steps - moveSel.w);
+    const p = clampBlockPos(moveDrag.origR + (at.r - moveDrag.startR), moveDrag.origC + (at.c - moveDrag.startC));
+    moveSel.r = p.r; moveSel.c = p.c;
     stampBlock();
     markDirty();
   }
+}
+// 이동 위치 클램프: 블록이 가장자리를 넘어가는 것을 허용하되(밖으로 나간 노트는 stampBlock이 버려 '잘림'),
+// 최소 1칸은 격자에 남겨 다시 잡을 수 있게 한다.
+function clampBlockPos(r, c) {
+  const rows = trackRowCount(mvTrack);
+  return { r: clampi(r, 1 - moveSel.h, rows - 1), c: clampi(c, 1 - moveSel.w, steps - 1) };
 }
 function moveMoveEv(e) {
   if (!moveDrag || e.pointerId !== moveDrag.id) return;
@@ -925,11 +930,15 @@ function edgeTick() {
   if (box.scrollLeft === bl && box.scrollTop === bt) { stopEdgeScroll(); return; } // 더 못 감
   applyDragAt(x, y); // 새로 드러난 칸까지 선택/이동을 이어간다
 }
+// 전체 선택: 이 트랙 전 범위를 골라 모든 노트를 들어올린다.
+function selectAllInMove() {
+  if (!moveMode || !mvTrack) return;
+  finalizeSelection({ r0: 0, c0: 0, r1: trackRowCount(mvTrack) - 1, c1: steps - 1 });
+}
 function moveNudge(dr, dc) {
   if (!moveMode || !moveSel) return;
-  const rows = trackRowCount(mvTrack);
-  moveSel.r = clampi(moveSel.r + dr, 0, rows - moveSel.h);
-  moveSel.c = clampi(moveSel.c + dc, 0, steps - moveSel.w);
+  const p = clampBlockPos(moveSel.r + dr, moveSel.c + dc);
+  moveSel.r = p.r; moveSel.c = p.c;
   stampBlock();
   ensureBlockVisible();
   markDirty();
@@ -937,7 +946,8 @@ function moveNudge(dr, dc) {
 // 화살표로 시야 밖까지 옮겨도 따라가 보이게
 function ensureBlockVisible() {
   const t = mvTrack; if (!t || !t._hscroll || !moveSel) return;
-  const el = t.cellEls && t.cellEls[moveSel.r] && t.cellEls[moveSel.r][moveSel.c]; if (!el) return;
+  const rr = clampi(moveSel.r, 0, trackRowCount(t) - 1), cc = clampi(moveSel.c, 0, steps - 1);
+  const el = t.cellEls && t.cellEls[rr] && t.cellEls[rr][cc]; if (!el) return;
   const sc = t._hscroll, cr = el.getBoundingClientRect(), sr = sc.getBoundingClientRect();
   if (cr.left < sr.left + LABEL_W) sc.scrollLeft -= (sr.left + LABEL_W - cr.left);
   else {
@@ -1364,6 +1374,7 @@ if (beatInput) {
 
 // 노트 이동 모드 툴바(진입 버튼은 트랙마다 있음). 확인/취소·화살표는 활성 트랙에 작용.
 const moveBar = document.getElementById("moveBar");
+document.getElementById("mvAll")?.addEventListener("click", selectAllInMove);
 document.getElementById("mvConfirm")?.addEventListener("click", () => exitMoveMode(true));
 document.getElementById("mvCancel")?.addEventListener("click", () => exitMoveMode(false));
 document.getElementById("mvUp")?.addEventListener("click", () => moveNudge(-1, 0));

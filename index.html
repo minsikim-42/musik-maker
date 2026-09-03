@@ -7,7 +7,7 @@
   <!-- 소리 엔진: Tone.js (Web Audio API 위에서 악기·타이밍·재생을 다룸) -->
   <script src="https://unpkg.com/tone@14.8.49/build/Tone.js"></script>
   <!-- ?v= 는 배포마다 올린다: 브라우저·GitHub Pages 캐시로 옛 버전이 남는 것을 막는다 -->
-  <link rel="stylesheet" href="style.css?v=52" />
+  <link rel="stylesheet" href="style.css?v=53" />
 </head>
 <body>
   <!-- 왼쪽에서 밀려나오는 세션(내 곡) 목록 + 메뉴 -->
@@ -80,6 +80,7 @@
       <button id="mvRight" title="오른쪽">▶</button>
       <button id="mvDown" title="아래로">▼</button>
     </div>
+    <button id="mvAll" title="이 트랙 전체 노트를 선택">전체 선택</button>
     <button id="mvConfirm" class="primary">✓ 확인</button>
     <button id="mvCancel">✗ 취소</button>
   </div>
@@ -104,6 +105,6 @@
     </div>
   </div>
 
-  <script src="app.js?v=52"></script>
+  <script src="app.js?v=53"></script>
 </body>
 </html>
