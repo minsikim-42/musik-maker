@@ -647,7 +647,7 @@ function renderTrack(track) {
     const moveTBtn = document.createElement("button");
     const activeHere = moveMode && mvTrack === track;
     moveTBtn.className = "t-move" + (activeHere ? " active" : "");
-    moveTBtn.textContent = activeHere ? "✥ 이동 중" : "✥ 이동";
+    moveTBtn.textContent = activeHere ? "✥ 선택이동 중" : "✥ 선택이동";
     moveTBtn.title = "이 트랙에서 노트 범위를 골라 옮깁니다";
     if (moveMode && !activeHere) moveTBtn.disabled = true; // 다른 트랙 이동 중
     moveTBtn.addEventListener("click", () => {
@@ -738,6 +738,7 @@ function enableDragScroll(scrollEl, flagEl, track) {
   let st = null;
   scrollEl.addEventListener("pointerdown", (e) => {
     if (moveMode && mvTrack === track) return;             // 이동 중인 트랙만 드래그=선택/이동(다른 트랙은 정상 스크롤)
+    if (e.target.closest && e.target.closest(".cell.on")) return; // 기존 노트 위에서 시작 → 노트 끌기(스크롤 안 함)
     if (e.pointerType !== "mouse" || e.button !== 0) return; // 터치/펜은 기본 스크롤
     st = { y: e.clientY, top: scrollEl.scrollTop, moved: false };
     flagEl._dragged = false;
@@ -770,16 +771,22 @@ function enableCellTap(grid, track) {
   grid.addEventListener("pointerdown", (e) => {
     if (moveMode && mvTrack === track) { moveDown(e, grid, track); return; } // 이 트랙 이동 모드
     const cell = e.target.closest(".cell");
-    tap = cell ? { id: e.pointerId, x: e.clientX, y: e.clientY, cell, moved: false } : null;
+    tap = cell ? { id: e.pointerId, x: e.clientX, y: e.clientY, cell, moved: false, onCell: cell.classList.contains("on") } : null;
   });
   grid.addEventListener("pointermove", (e) => {
     if (moveDrag && moveDrag.grid === grid) { moveMoveEv(e); return; }
+    if (noteDrag && noteDrag.grid === grid && noteDrag.id === e.pointerId) { noteDragMove(e); return; }
     if (!tap || e.pointerId !== tap.id) return;
-    if (Math.abs(e.clientX - tap.x) > TAP_SLOP || Math.abs(e.clientY - tap.y) > TAP_SLOP) tap.moved = true;
+    if (Math.abs(e.clientX - tap.x) > TAP_SLOP || Math.abs(e.clientY - tap.y) > TAP_SLOP) {
+      tap.moved = true;
+      // 기존 노트를 눌러 드래그하면(일반 모드) 그 노트 하나만 끌어 옮긴다.
+      if (tap.onCell && !moveMode) { startNoteDrag(e, grid, track, tap.cell); tap = null; }
+    }
   });
   grid.addEventListener("pointercancel", () => { tap = null; }); // 스크롤 시작 등 → 탭 취소
   grid.addEventListener("pointerup", async (e) => {
     if (moveDrag && moveDrag.grid === grid) { moveUpEv(e, grid); return; }
+    if (noteDrag && noteDrag.grid === grid && noteDrag.id === e.pointerId) { noteDragUp(e, grid); return; }
     if (!tap || e.pointerId !== tap.id) return;
     const t = tap; tap = null;
     if (t.moved || grid._dragged) return; // 드래그(스크롤)면 음 안 찍음
@@ -792,6 +799,45 @@ function enableCellTap(grid, track) {
     if (track.grid[r][c]) { await Tone.start(); preview(track, r); }
     markDirty();
   });
+}
+
+// ── 기존 노트 한 개를 끌어 옮기기(일반 모드) ──────────────────
+let noteDrag = null; // { id, grid, track, srcR, srcC, curR, curC }
+function startNoteDrag(e, grid, track, cell) {
+  noteDrag = { id: e.pointerId, grid, track, srcR: cell._r, srcC: cell._c, curR: cell._r, curC: cell._c };
+  try { grid.setPointerCapture(e.pointerId); } catch (x) {}
+  e.preventDefault();
+  cell.classList.add("note-dragging"); // 끌고 있는 원래 노트 표시(반투명)
+}
+function clearNoteTarget(track) {
+  if (!track.cellEls) return;
+  for (const row of track.cellEls) for (const el of row) if (el) el.classList.remove("note-target");
+}
+function noteDragMove(e) {
+  const at = cellAt(e.clientX, e.clientY, noteDrag.track);
+  if (!at) return; // 격자 밖·스크롤바 위 → 마지막 대상 유지
+  if (at.r === noteDrag.curR && at.c === noteDrag.curC) return;
+  clearNoteTarget(noteDrag.track);
+  noteDrag.curR = at.r; noteDrag.curC = at.c;
+  const el = noteDrag.track.cellEls[at.r] && noteDrag.track.cellEls[at.r][at.c];
+  if (el) el.classList.add("note-target"); // 놓일 자리 미리보기
+}
+function noteDragUp(e, grid) {
+  try { grid.releasePointerCapture(e.pointerId); } catch (x) {}
+  const { track, srcR, srcC, curR, curC } = noteDrag;
+  noteDrag = null;
+  clearNoteTarget(track);
+  const src = track.cellEls[srcR] && track.cellEls[srcR][srcC];
+  if (src) src.classList.remove("note-dragging");
+  if (curR === srcR && curC === srcC) return; // 제자리 → 변화 없음
+  // 그 노트만 이동: 소스 끄고 대상 켜기(겹치면 덮어씀)
+  track.grid[srcR][srcC] = false;
+  track.grid[curR][curC] = true;
+  if (src) src.classList.remove("on");
+  const dst = track.cellEls[curR] && track.cellEls[curR][curC];
+  if (dst) dst.classList.add("on");
+  if (!playing) setPlayhead(curC);
+  markDirty();
 }
 
 // ══════════════════════════════════════════════════════════════
