@@ -794,7 +794,7 @@ function enableCellTap(grid, track) {
     if (r == null || c == null) return;
     track.grid[r][c] = !track.grid[r][c];
     cell.classList.toggle("on", track.grid[r][c]);
-    if (!playing) setPlayhead(c); // 클릭한 칸의 위치를 상단 플레이바(n마디n박)·핸들에 표시
+    showEditMarker(c); // 찍은 칸이 플레이바 어디인지 별도 표식(재생 핸들은 안 옮김)
     // pointerup은 사용자 제스처 → 오디오 컨텍스트를 켠 뒤 미리듣기(첫 음 무음 방지).
     if (track.grid[r][c]) { await Tone.start(); preview(track, r); }
     markDirty();
@@ -836,7 +836,7 @@ function noteDragUp(e, grid) {
   if (src) src.classList.remove("on");
   const dst = track.cellEls[curR] && track.cellEls[curR][curC];
   if (dst) dst.classList.add("on");
-  if (!playing) setPlayhead(curC);
+  showEditMarker(curC); // 옮긴 칸 위치를 플레이바에 표식(핸들은 안 옮김)
   markDirty();
 }
 
@@ -1061,6 +1061,18 @@ const timelineEl = document.getElementById("timeline");
 const tlFill = document.getElementById("tlFill");
 const tlHandle = document.getElementById("tlHandle");
 const tlPos = document.getElementById("tlPos");
+const tlEdit = document.getElementById("tlEdit");
+const tlEditPos = document.getElementById("tlEditPos");
+// 노트 찍는(편집) 위치를 플레이바에 별도 표식으로 보여준다(재생 핸들은 안 건드림).
+function showEditMarker(col) {
+  const pct = steps > 0 ? (col / steps) * 100 : 0;
+  if (tlEdit) { tlEdit.style.left = pct + "%"; tlEdit.hidden = false; }
+  if (tlEditPos) { tlEditPos.textContent = "✎ " + stepToPos(col); tlEditPos.hidden = false; }
+}
+function hideEditMarker() {
+  if (tlEdit) tlEdit.hidden = true;
+  if (tlEditPos) tlEditPos.hidden = true;
+}
 
 function stepToPos(step) {
   const bc = barCells();
@@ -1195,7 +1207,7 @@ function deserialize(data) {
   for (const td of data.tracks || []) tracks.push(makeTrackObj(td.type, td));
   render();
   rebuildSequence();
-  playheadStep = 0; playing = false; paused = false; updateTimeline(); // 곡을 열면 재생 위치는 처음으로
+  playheadStep = 0; playing = false; paused = false; updateTimeline(); hideEditMarker(); // 곡을 열면 재생 위치는 처음으로
   loading = false;
 }
 

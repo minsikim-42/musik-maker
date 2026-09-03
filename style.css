@@ -92,6 +92,22 @@ body {
   box-shadow: 0 0 0 1px rgba(0,0,0,.35);
   pointer-events: none;
 }
+/* 편집(노트 찍는) 위치 마커 — 재생 핸들과 별개(초록) */
+.tl-edit {
+  position: absolute;
+  top: 0; bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: #34d399;
+  pointer-events: none;
+}
+.tl-editpos {
+  font-size: 12px;
+  color: #34d399;
+  min-width: 82px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
 #syncScroll.active {
   background: var(--accent);
   color: #0b1020;
