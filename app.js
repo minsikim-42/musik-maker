@@ -2,11 +2,6 @@
 // 세션 = 곡 하나(트랙·악기·격자·템포·마디). 브라우저 localStorage에 저장된다.
 // 목록에서 곡을 누르면 그 곡이 열린다. 저장은 '저장' 버튼을 누를 때만 한다(자동 저장 없음).
 
-// ── 실시간 재생 스케줄 여유 조금 늘리기(지직거림 완화) ─────────────────
-// 컨텍스트를 새로 만들면(setContext) 모바일에서 재생이 막히는 문제가 있어, 기존 컨텍스트의
-// lookAhead(스케줄러가 미리 예약하는 창)만 살짝 키운다. 재생·오디오 시작 방식은 그대로.
-try { Tone.getContext().lookAhead = 0.15; } catch (e) {}
-
 // ── 음/드럼 줄 정의 ─────────────────────────────────────────────
 // 멜로디 음역: C6(맨 위) ~ C3(맨 아래). 격자는 이 중 일부만 보여주고 세로 스크롤한다.
 function buildMelodyNotes(lowOct, highOct) {
@@ -115,7 +110,6 @@ function detectSampleFreq(toneBuf) {
 const MASTER_TRIM = 0.5;  // -6dB 헤드룸
 const MASTER_DRIVE = 6;   // 소프트 클립이 다루는 입력 범위(±6까지 매끄럽게)
 const REVERB_WET = 0.55;  // 트랙 잔향 켰을 때 젖음 비율(0=드라이, 1=완전 잔향)
-const MAX_POLY = 16;      // 트랙당 동시 발음수 상한(기본 32 → 절반). 트리거 순간 CPU 스파이크·상시 오실레이터 억제
 function softShape(s) {    // 0.9 이하는 그대로, 그 위는 tanh로 완만히 굽혀 ~1.0에서 멈춘다
   const t = 0.9, a = Math.abs(s), sg = Math.sign(s);
   return a <= t ? s : sg * (t + (1 - t) * Math.tanh((a - t) / (1 - t)));
@@ -177,12 +171,11 @@ function makeKickBuffer(peak) {
 // out = 최종 출력 노드(마스터 리미터). → 재생용(buildSynth)과 WAV 오프라인 렌더가 공유한다.
 function createVoices(track, out) {
   out = out || realtimeMaster();
-  // 체인: 신스 → 트랙 볼륨 → (잔향 켜졌을 때만 리버브) → 마스터.
-  // 리버브가 꺼져 있으면 컨볼버를 아예 안 만든다(끄면 무음이라 소리는 같지만 실시간 CPU를 크게 아낌).
-  // 켤 때 지연 생성(setTrackReverb)하고, vol._reverb에 참조를 달아 라이브 토글에 쓴다.
-  let reverb = null, dest = out;
-  if (track.reverb) { reverb = new Tone.Reverb({ decay: 3.6, preDelay: 0.02, wet: REVERB_WET }).connect(out); dest = reverb; }
-  const vol = new Tone.Volume(track.volume ?? 0).connect(dest);
+  // 체인: 신스 → 트랙 볼륨 → 트랙 잔향(리버브) → 마스터.
+  // 리버브 wet=0이면 완전 드라이(꺼짐), 켜면 꼬리가 붙어 소리가 더 오래 울린다.
+  // 라이브 토글·해제 때 접근하려고 vol에 리버브 참조를 달아 둔다(반환 객체마다 안 달아도 되게).
+  const reverb = new Tone.Reverb({ decay: 3.6, preDelay: 0.02, wet: track.reverb ? REVERB_WET : 0 }).connect(out);
+  const vol = new Tone.Volume(track.volume ?? 0).connect(reverb);
   vol._reverb = reverb;
 
   if (track.type === "drums") {
@@ -234,15 +227,9 @@ function createVoices(track, out) {
     // 신스 소리: 사용자가 만든 음색. MonoSynth로 필터(공명)+필터엔벨로프를 내장으로 얻고,
     // 뒤에 이펙트 체인(디스토션·비트크러셔·코러스·비브라토·트레모로)을 단다.
     const poly = new Tone.PolySynth(Tone.MonoSynth, monoSynthOpts(snd));
-    poly.maxPolyphony = MAX_POLY; // 동시 발음수 제한 → 트리거 순간 CPU 스파이크·상시 오실레이터 수 억제
     poly.volume.value = snd.volume;
-    // 이펙트가 하나라도 켜졌을 때만 체인을 붙인다(전부 0이면 상시 연산 노드를 안 만들어 CPU 절약).
-    if (anyFx(snd)) {
-      const fx = buildFxChain(poly, snd, vol);
-      return { kind: "melody", poly, fx, vol };
-    }
-    poly.connect(vol);
-    return { kind: "melody", poly, vol };
+    const fx = buildFxChain(poly, snd, vol);
+    return { kind: "melody", poly, fx, vol };
   }
 
   // 모든 악기는 PolySynth(Tone.Synth) 기반(화음 가능). PluckSynth/NoiseSynth는 Monophonic이 아니라
@@ -284,7 +271,6 @@ function createVoices(track, out) {
       envelope: { attack: 0.005, decay: 0.2, sustain: 0.2, release: 0.6 },
     });
   }
-  poly.maxPolyphony = MAX_POLY; // 동시 발음수 제한(트리거 순간 부하 억제)
   poly.connect(vol);
   poly.volume.value = track.instrument === "wind" ? -4 : -6; // 사인은 살짝 작게 들려 보정
   return { kind: "melody", poly, vol };
@@ -368,18 +354,12 @@ function applyFxValues(fx, s) {
   fx.chorus.wet.value = s.chorus ?? 0;
   fx.trem.depth.value = s.tremolo ?? 0;
 }
-// 이펙트가 하나라도 켜져 있나(전부 0이면 이펙트 체인 자체를 안 만들어 실시간 CPU를 아낀다)
-function anyFx(s) {
-  return (s.distortion || 0) > 0 || (s.bitcrush || 0) > 0 || (s.chorus || 0) > 0 || (s.vibrato || 0) > 0 || (s.tremolo || 0) > 0;
-}
 // 소리를 편집할 때: 그 소리를 쓰는 트랙 신스에 즉시 반영(재생성 없이)
 function applyParamsLive(track) {
   const s = track.synth;
   if (!s || s.kind !== "melody" || !s.poly.set) return;
   const p = trackSound(track);
   if (!p || p.kind === "sample") return;
-  // 이펙트 유무가 바뀌면(0↔양수) 체인을 새로 붙여야 하므로 신스만 재생성(드물게 슬라이더가 0을 넘길 때)
-  if (anyFx(p) !== !!s.fx) { track.synth = buildSynth(track); return; }
   s.poly.set(monoSynthOpts(p));
   s.poly.volume.value = p.volume;
   if (s.fx) applyFxValues(s.fx, p);
@@ -408,19 +388,11 @@ function setTrackVolume(track, db) {
   if (track.synth && track.synth.vol) track.synth.vol.volume.value = db;
 }
 
-// 트랙 잔향(리버브) 켜고 끄기. 리버브 컨볼버는 '꺼져 있으면 아예 안 만든다'(실시간 CPU 절약).
-// 처음 켤 때만 노드를 만들어 vol 뒤에 끼우고(지연 생성), 이후 토글은 wet만 라이브로 바꾼다.
+// 트랙 잔향(리버브) 켜고 끄기를 라이브로(재생성 없이). wet만 바꾼다.
 function setTrackReverb(track, on) {
   track.reverb = !!on;
-  const s = track.synth;
-  if (!s || !s.vol) return;
-  if (s.vol._reverb) { s.vol._reverb.wet.value = on ? REVERB_WET : 0; return; } // 이미 노드 있으면 라이브
-  if (on) { // 노드가 없는데 켜야 함 → 리버브 만들어 vol → 리버브 → 마스터로 재연결
-    const reverb = new Tone.Reverb({ decay: 3.6, preDelay: 0.02, wet: REVERB_WET }).connect(realtimeMaster());
-    s.vol.disconnect();
-    s.vol.connect(reverb);
-    s.vol._reverb = reverb;
-  }
+  const rv = track.synth && track.synth.vol && track.synth.vol._reverb;
+  if (rv) rv.wet.value = on ? REVERB_WET : 0;
 }
 
 // 한 격자(grid 또는 half)의 col 열에 켜진 노트를 time에 울린다.
