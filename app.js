@@ -665,6 +665,7 @@ function renderTrack(track) {
   head.appendChild(volWrap);
 
   const muteBtn = document.createElement("button");
+  muteBtn.className = "t-mute"; // 음소거는 편집 잠금 상태에서도 쓸 수 있게(재생/믹싱 컨트롤)
   muteBtn.textContent = track.muted ? "음소거 해제" : "음소거";
   muteBtn.addEventListener("click", () => { track.muted = !track.muted; render(); markDirty(); });
   head.appendChild(muteBtn);

@@ -73,7 +73,7 @@ body.locked .controls label,
 body.locked #addTrack,
 body.locked .bar-ctl,
 body.locked .track-head select,
-body.locked .track-head button:not(.t-collapse),
+body.locked .track-head button:not(.t-collapse):not(.t-mute),
 body.locked .track-head .t-vol input,
 body.locked #moveBar {
   pointer-events: none;
