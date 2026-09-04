@@ -1726,17 +1726,10 @@ function setBpm(v, opts = {}) {
   if (!opts.silent) markDirty();
 }
 
-const btnPlayStart = document.getElementById("playStart");
 const btnPlayHere = document.getElementById("playHere");
-// 버튼 라벨을 상태에 맞춰 갱신: 재생 중엔 둘 다 '일시정지', 멈춤/일시정지 땐 원래 라벨.
+// 재생 버튼 라벨을 상태에 맞춰 갱신: 재생 중=일시정지, 일시정지=이어서, 멈춤=현재.
 function updateTransportButtons() {
-  if (playing) {
-    btnPlayStart.textContent = "⏸ 일시정지";
-    btnPlayHere.textContent = "⏸ 일시정지";
-  } else {
-    btnPlayStart.textContent = "⏮ 처음";
-    btnPlayHere.textContent = paused ? "▶ 이어서" : "▶ 현재";
-  }
+  btnPlayHere.textContent = playing ? "⏸ 일시정지" : (paused ? "▶ 이어서" : "▶ 현재");
 }
 function pausePlayback() {
   Tone.Transport.pause();      // 위치를 유지한 채 멈춘다(이어재생 가능)
@@ -1770,7 +1763,6 @@ async function playFrom(fromStep, opts = {}) {
   Tone.Transport.start("+0.05", N * Tone.Time("16n").toSeconds());
   updateTransportButtons();
 }
-btnPlayStart.addEventListener("click", () => playFrom(0));                        // 처음부터(재생 중이면 일시정지)
 btnPlayHere.addEventListener("click", () => playFrom(playheadStep, { resume: true })); // 현재/이어서(재생 중이면 일시정지)
 document.getElementById("stop").addEventListener("click", () => {
   Tone.Transport.stop();
