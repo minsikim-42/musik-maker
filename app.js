@@ -782,7 +782,7 @@ function enableDragScroll(scrollEl, flagEl, track) {
   let st = null;
   scrollEl.addEventListener("pointerdown", (e) => {
     if (moveMode && mvTrack === track) return;             // 이동 중인 트랙만 드래그=선택/이동(다른 트랙은 정상 스크롤)
-    if (e.target.closest && e.target.closest(".cell.on, .cell.half-on")) return; // 기존 노트(한 칸/반칸) 위에서 시작 → 노트 끌기(스크롤 안 함)
+    if (noteAt(e.clientX, e.clientY, track)) return; // 노트(한 칸/반칸, 반칸 넘침 영역 포함) 위에서 시작 → 노트 끌기(스크롤 안 함)
     if (e.pointerType !== "mouse" || e.button !== 0) return; // 터치/펜은 기본 스크롤
     st = { y: e.clientY, top: scrollEl.scrollTop, moved: false };
     flagEl._dragged = false;
