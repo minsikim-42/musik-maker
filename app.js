@@ -987,8 +987,11 @@ function noteDragUp(e, grid) {
 // 이동할 때마다 track.grid = base + notes를 (r,c) 위치에 다시 찍는다 → 격자가 바로 갱신돼 재생도 옮긴 대로 난다.
 let moveMode = false;
 let mvTrack = null; // 이동 모드가 적용되는 '한 트랙'(이 트랙 안에서만 선택/이동)
-let moveSel = null;   // { track, notes:[[dr,dc]], h, w, r, c, base }
+// 노트를 [행오프셋, 반박자오프셋(dh)]로 들어올린다. dh=짝수→한 칸(grid), 홀수→반칸(half) 위치.
+// 블록 왼쪽 위치 cHalf(반박자 단위)를 옮기면 각 노트가 cHalf+dh에 다시 찍힌다(짝/홀로 grid/half 결정).
+let moveSel = null;   // { track, notes:[[dr,dh]], h, w, r, cHalf, c, base, halfBase }
 let moveDrag = null;  // { mode:'select'|'move', grid, id, lastX, lastY, ... }
+let moveHalfStep = false; // 이동 단위 토글: false=1노트(한 칸), true=반박자(반 칸)
 let moveSnapshot = null;     // mvTrack.grid 복사 — 취소 복원용
 let moveSnapshotHalf = null; // mvTrack.half 복사 — 취소 복원용(반박자)
 const clampi = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
@@ -1018,34 +1021,33 @@ function refreshTrackCells(t) {
 // 들어올린 블록을 base 위에 현재 (r,c)로 다시 찍는다(격자 데이터 갱신 → 재생 반영).
 function stampBlock() {
   if (!moveSel) return;
-  const t = moveSel.track, g = t.grid, base = moveSel.base;
-  const hg = t.half, hbase = moveSel.halfBase;
+  const t = moveSel.track, g = t.grid, base = moveSel.base, hg = t.half, hbase = moveSel.halfBase;
   for (let r = 0; r < g.length; r++) for (let c = 0; c < g[r].length; c++) {
     g[r][c] = base[r][c];
     if (hg && hbase) hg[r][c] = hbase[r][c];
   }
-  for (const [dr, dc] of moveSel.notes) {
-    const rr = moveSel.r + dr, cc = moveSel.c + dc;
-    if (rr >= 0 && rr < g.length && cc >= 0 && cc < steps) g[rr][cc] = true; // 겹치면 덮어씀(합쳐짐)
-  }
-  if (hg && moveSel.halfNotes) for (const [dr, dc] of moveSel.halfNotes) {
-    const rr = moveSel.r + dr, cc = moveSel.c + dc;
-    if (rr >= 0 && rr < hg.length && cc >= 0 && cc < steps) hg[rr][cc] = true; // 반박자도 같이 옮김
+  for (const [dr, dh] of moveSel.notes) {
+    const H = moveSel.cHalf + dh;            // 절대 반박자 위치
+    const rr = moveSel.r + dr, cc = Math.floor(H / 2), isHalf = H & 1; // 짝수=한 칸, 홀수=반칸
+    if (rr < 0 || rr >= g.length || cc < 0 || cc >= steps) continue;   // 밖으로 나간 노트는 버림(잘림)
+    if (isHalf) { if (hg) hg[rr][cc] = true; } else g[rr][cc] = true;  // 겹치면 덮어씀(합쳐짐)
   }
   refreshTrackCells(t);
-  paintSelRect(t, moveSel.r, moveSel.c, moveSel.r + moveSel.h - 1, moveSel.c + moveSel.w - 1);
+  const c0 = Math.floor(moveSel.cHalf / 2);
+  moveSel.c = c0; // 파생: 강조·경계 계산용 셀 왼쪽
+  paintSelRect(t, moveSel.r, c0, moveSel.r + moveSel.h - 1, c0 + moveSel.w - 1 + (moveSel.cHalf & 1));
 }
 function finalizeSelection(d) {
   const r0 = Math.min(d.r0, d.r1), r1 = Math.max(d.r0, d.r1);
   const c0 = Math.min(d.c0, d.c1), c1 = Math.max(d.c0, d.c1);
-  const t = mvTrack, notes = [], halfNotes = [];
+  const t = mvTrack, notes = [];
   const base = t.grid.map((row) => row.slice());
   const halfBase = t.half ? t.half.map((row) => row.slice()) : null;
   for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) {
-    if (t.grid[r][c]) { notes.push([r - r0, c - c0]); base[r][c] = false; }
-    if (t.half && t.half[r][c]) { halfNotes.push([r - r0, c - c0]); halfBase[r][c] = false; } // 반박자도 선택에 포함
+    if (t.grid[r][c]) { notes.push([r - r0, 2 * (c - c0)]); base[r][c] = false; }        // 한 칸 → 짝수 dh
+    if (t.half && t.half[r][c]) { notes.push([r - r0, 2 * (c - c0) + 1]); halfBase[r][c] = false; } // 반칸 → 홀수 dh
   }
-  moveSel = { track: t, notes, halfNotes, h: r1 - r0 + 1, w: c1 - c0 + 1, r: r0, c: c0, base, halfBase };
+  moveSel = { track: t, notes, h: r1 - r0 + 1, w: c1 - c0 + 1, r: r0, cHalf: 2 * c0, c: c0, base, halfBase };
   stampBlock();
 }
 function cellAt(x, y, track) {
@@ -1059,10 +1061,13 @@ function moveDown(e, grid, track) {
   e.preventDefault();
   try { grid.setPointerCapture(e.pointerId); } catch (x) {}
   const r = cell._r, c = cell._c;
+  const wCells = moveSel ? moveSel.w + (moveSel.cHalf & 1) : 0; // 반박자로 밀리면 한 칸 더 걸침
   const inBlock = moveSel &&
-    r >= moveSel.r && r < moveSel.r + moveSel.h && c >= moveSel.c && c < moveSel.c + moveSel.w;
+    r >= moveSel.r && r < moveSel.r + moveSel.h && c >= moveSel.c && c < moveSel.c + wCells;
   if (inBlock) {
-    moveDrag = { mode: "move", grid, id: e.pointerId, startR: r, startC: c, origR: moveSel.r, origC: moveSel.c, lastX: e.clientX, lastY: e.clientY };
+    let startHalf = 2 * c;
+    if (moveHalfStep) { const rc = cell.getBoundingClientRect(); if (e.clientX >= rc.left + rc.width / 2) startHalf += 1; }
+    moveDrag = { mode: "move", grid, id: e.pointerId, startR: r, startHalf, origR: moveSel.r, origCHalf: moveSel.cHalf, lastX: e.clientX, lastY: e.clientY };
   } else {
     moveSel = null; clearMoveSelClasses(track);
     moveDrag = { mode: "select", grid, id: e.pointerId, r0: r, c0: c, r1: r, c1: c, lastX: e.clientX, lastY: e.clientY };
@@ -1081,17 +1086,24 @@ function applyDragAt(x, y) {
     moveDrag.r1 = at.r; moveDrag.c1 = at.c;
     paintSelRect(mvTrack, moveDrag.r0, moveDrag.c0, at.r, at.c);
   } else {
-    const p = clampBlockPos(moveDrag.origR + (at.r - moveDrag.startR), moveDrag.origC + (at.c - moveDrag.startC));
-    moveSel.r = p.r; moveSel.c = p.c;
+    // 포인터의 반박자 위치(반박자 모드면 칸 오른쪽 절반=+1). delta만큼 블록을 옮긴다.
+    let curHalf = 2 * at.c;
+    if (moveHalfStep) {
+      const cel = mvTrack.cellEls[at.r] && mvTrack.cellEls[at.r][at.c];
+      if (cel) { const rc = cel.getBoundingClientRect(); if (cx >= rc.left + rc.width / 2) curHalf += 1; }
+    }
+    const newCHalf = moveDrag.origCHalf + (curHalf - moveDrag.startHalf);
+    const p = clampBlockPosHalf(moveDrag.origR + (at.r - moveDrag.startR), newCHalf);
+    moveSel.r = p.r; moveSel.cHalf = p.cHalf;
     stampBlock();
     markDirty();
   }
 }
 // 이동 위치 클램프: 블록이 가장자리를 넘어가는 것을 허용하되(밖으로 나간 노트는 stampBlock이 버려 '잘림'),
 // 최소 1칸은 격자에 남겨 다시 잡을 수 있게 한다.
-function clampBlockPos(r, c) {
+function clampBlockPosHalf(r, cHalf) {
   const rows = trackRowCount(mvTrack);
-  return { r: clampi(r, 1 - moveSel.h, rows - 1), c: clampi(c, 1 - moveSel.w, steps - 1) };
+  return { r: clampi(r, 1 - moveSel.h, rows - 1), cHalf: clampi(cHalf, 1 - 2 * moveSel.w, 2 * steps - 1) };
 }
 function moveMoveEv(e) {
   if (!moveDrag || e.pointerId !== moveDrag.id) return;
@@ -1138,10 +1150,11 @@ function selectAllInMove() {
   if (!moveMode || !mvTrack) return;
   finalizeSelection({ r0: 0, c0: 0, r1: trackRowCount(mvTrack) - 1, c1: steps - 1 });
 }
-function moveNudge(dr, dc) {
+// dcHalf = 가로 이동량(반박자 단위). 화살표는 1노트=±2, 반박자모드=±1을 넘긴다.
+function moveNudge(dr, dcHalf) {
   if (!moveMode || !moveSel) return;
-  const p = clampBlockPos(moveSel.r + dr, moveSel.c + dc);
-  moveSel.r = p.r; moveSel.c = p.c;
+  const p = clampBlockPosHalf(moveSel.r + dr, moveSel.cHalf + dcHalf);
+  moveSel.r = p.r; moveSel.cHalf = p.cHalf;
   stampBlock();
   ensureBlockVisible();
   markDirty();
@@ -1169,6 +1182,7 @@ function enterMoveMode(track) {
   moveSnapshot = track.grid.map((row) => row.slice()); // 이 트랙만 스냅샷(취소 복원)
   moveSnapshotHalf = track.half ? track.half.map((row) => row.slice()) : null;
   if (moveBar) moveBar.hidden = false;
+  if (typeof updateMvHalfLabel === "function") updateMvHalfLabel(); // 토글 라벨을 현재 상태와 맞춤
   render(); // 활성 트랙 버튼·스타일 반영(다른 트랙 이동 버튼 잠금 포함)
 }
 function exitMoveMode(commit) {
@@ -1631,13 +1645,20 @@ if (barInput) {
 
 // 노트 이동 모드 툴바(진입 버튼은 트랙마다 있음). 확인/취소·화살표는 활성 트랙에 작용.
 const moveBar = document.getElementById("moveBar");
+const mvHalfBtn = document.getElementById("mvHalf");
+function updateMvHalfLabel() {
+  if (!mvHalfBtn) return;
+  mvHalfBtn.textContent = moveHalfStep ? "이동: 반박자" : "이동: 1노트";
+  mvHalfBtn.classList.toggle("active", moveHalfStep);
+}
+mvHalfBtn?.addEventListener("click", () => { moveHalfStep = !moveHalfStep; updateMvHalfLabel(); });
 document.getElementById("mvAll")?.addEventListener("click", selectAllInMove);
 document.getElementById("mvConfirm")?.addEventListener("click", () => exitMoveMode(true));
 document.getElementById("mvCancel")?.addEventListener("click", () => exitMoveMode(false));
 document.getElementById("mvUp")?.addEventListener("click", () => moveNudge(-1, 0));
 document.getElementById("mvDown")?.addEventListener("click", () => moveNudge(1, 0));
-document.getElementById("mvLeft")?.addEventListener("click", () => moveNudge(0, -1));
-document.getElementById("mvRight")?.addEventListener("click", () => moveNudge(0, 1));
+document.getElementById("mvLeft")?.addEventListener("click", () => moveNudge(0, moveHalfStep ? -1 : -2));
+document.getElementById("mvRight")?.addEventListener("click", () => moveNudge(0, moveHalfStep ? 1 : 2));
 
 // 곡 길이(마디) 조절 — 트랙 격자 오른쪽 끝 ＋/－ 버튼이 부른다. 상한 없음, 최소 1마디.
 function changeBars(delta) {
