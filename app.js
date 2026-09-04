@@ -2145,9 +2145,14 @@ function openSoundEditor(sound) {
   back.addEventListener("click", openSoundManager);
   modalBody.appendChild(back);
 
-  const intro = document.createElement("p");
-  intro.textContent = "슬라이더를 움직이면 이 소리를 쓰는 트랙에 바로 반영됩니다. 미리듣기로 확인하세요.";
-  modalBody.appendChild(intro);
+  // 맨 위 미리듣기(설정값 위에서도 바로 들어볼 수 있게)
+  const topPrev = document.createElement("button");
+  topPrev.className = "synth-preview-top";
+  topPrev.textContent = "▶ 미리듣기";
+  topPrev.addEventListener("click", () => playSoundPreview(sound));
+  modalBody.appendChild(topPrev);
+
+  let curBody = modalBody; // 현재 필드가 담길 곳(그룹 body 또는 modalBody)
 
   section("기본");
   const waveRow = document.createElement("div");
@@ -2164,31 +2169,31 @@ function openSoundEditor(sound) {
     });
     waveRow.appendChild(b);
   }
-  addField("파형", waveRow, "소리의 기본 재질이에요. 사인=부드럽고 순함, 삼각=살짝 부드러움, 사각=속 빈 레트로, 톱니=밝고 꽉 찬 소리.");
+  addField("파형", waveRow, "소리의 기본 재질. 사인=순함, 삼각=살짝 부드럽게, 사각=레트로, 톱니=밝고 꽉 참.");
 
-  slider("어택 (시작 빠르기)", "attack", 0, 2, 0.005, "s", (v) => v.toFixed(3), "건반을 누른 순간부터 소리가 최대로 커지기까지 걸리는 시간. 짧으면 '탁' 치고, 길면 '스르륵' 부풀어 올라요.");
-  slider("디케이 (감쇠)", "decay", 0, 2, 0.005, "s", (v) => v.toFixed(3), "최대로 커진 뒤 아래 '서스테인' 크기까지 줄어드는 시간.");
-  slider("서스테인 (지속 크기)", "sustain", 0, 1, 0.01, "", (v) => v.toFixed(2), "건반을 누르고 있는 동안 유지되는 소리 크기.");
-  slider("릴리스 (여운)", "release", 0, 3, 0.01, "s", (v) => v.toFixed(2), "건반을 뗀 뒤 소리가 사라지기까지의 여운.");
+  slider("어택 (시작 빠르기)", "attack", 0, 2, 0.005, "s", (v) => v.toFixed(3), "최대 크기까지 걸리는 시간. 짧으면 '탁', 길면 '스르륵'.");
+  slider("디케이 (감쇠)", "decay", 0, 2, 0.005, "s", (v) => v.toFixed(3), "최대 뒤 서스테인 크기까지 줄어드는 시간.");
+  slider("서스테인 (지속 크기)", "sustain", 0, 1, 0.01, "", (v) => v.toFixed(2), "누르고 있는 동안 유지되는 크기.");
+  slider("릴리스 (여운)", "release", 0, 3, 0.01, "s", (v) => v.toFixed(2), "뗀 뒤 사라지는 여운.");
 
   section("필터 (밝기·질감)");
-  dropdown("필터 종류", "filterType", FILTER_TYPES, "어느 쪽 주파수를 통과시킬지. 로우패스=낮은 쪽만(두껍고 둥글게), 하이패스=높은 쪽만(얇고 가늘게), 밴드패스=가운데만(코맹맹이).");
-  slider("컷오프 (밝기)", "cutoff", 200, 8000, 10, "Hz", (v) => Math.round(v), "필터가 잘라내기 시작하는 지점. 낮추면 어둡고 먹먹, 높이면 밝고 선명해져요.");
-  slider("공명 (Resonance)", "resonance", 0.5, 12, 0.1, "", (v) => v.toFixed(1), "컷오프 지점을 뾰족하게 강조해요. 올리면 '삑/뿅' 하는 개성 있는 울림(너무 높이면 삑사리).");
-  slider("필터 움직임", "filterEnvAmount", 0, 6, 0.1, "oct", (v) => v.toFixed(1), "소리 나는 동안 밝기(컷오프)가 저절로 위로 열려요. 올리면 뜯을 때 '와우/반짝' 하는 신스 특유의 움직임. 0이면 안 움직임.");
-  slider("필터 속도", "filterDecay", 0.02, 1.5, 0.01, "s", (v) => v.toFixed(2), "위 '필터 움직임'이 열렸다 닫히는 빠르기. 짧으면 '뾰옹' 빠르게, 길면 천천히 어두워져요.");
+  dropdown("필터 종류", "filterType", FILTER_TYPES, "통과 대역. 로우패스=낮은 쪽(둥글게), 하이패스=높은 쪽(얇게), 밴드패스=가운데.");
+  slider("컷오프 (밝기)", "cutoff", 200, 8000, 10, "Hz", (v) => Math.round(v), "자르기 시작하는 지점. 낮추면 먹먹, 높이면 선명.");
+  slider("공명 (Resonance)", "resonance", 0.5, 12, 0.1, "", (v) => v.toFixed(1), "컷오프를 뾰족하게 강조. 올리면 '삑/뿅'(과하면 삑사리).");
+  slider("필터 움직임", "filterEnvAmount", 0, 6, 0.1, "oct", (v) => v.toFixed(1), "소리 나는 동안 밝기가 저절로 열림. 0이면 고정.");
+  slider("필터 속도", "filterDecay", 0.02, 1.5, 0.01, "s", (v) => v.toFixed(2), "필터 움직임이 열렸다 닫히는 빠르기.");
 
-  section("두께");
-  slider("두께 (디튠)", "detune", 0, 60, 1, "", (v) => Math.round(v), "같은 소리를 살짝 음정 어긋나게 여러 겹 겹쳐 두툼하게. 올리면 넓고 꽉 찬 '슈퍼소우' 느낌. 0이면 홑겹.");
+  section("두께", false);
+  slider("두께 (디튠)", "detune", 0, 60, 1, "", (v) => Math.round(v), "어긋난 소리를 겹쳐 두툼하게(슈퍼소우). 0이면 홑겹.");
 
-  section("이펙트");
-  slider("디스토션", "distortion", 0, 1, 0.01, "", (v) => v.toFixed(2), "일부러 찌그러뜨려 거칠고 강한 톤으로. 록/일렉 기타 같은 거친 질감. 0이면 끔.");
-  slider("비트크러셔", "bitcrush", 0, 1, 0.01, "", (v) => v.toFixed(2), "소리 해상도를 낮춰 8비트 게임기 같은 레트로·로파이 느낌. 0이면 끔.");
-  slider("코러스", "chorus", 0, 1, 0.01, "", (v) => v.toFixed(2), "미세하게 어긋난 복사본을 겹쳐 넓고 몽환적으로. 공간이 넓어진 느낌. 0이면 끔.");
+  section("이펙트", false);
+  slider("디스토션", "distortion", 0, 1, 0.01, "", (v) => v.toFixed(2), "찌그러뜨려 거칠게. 0이면 끔.");
+  slider("비트크러셔", "bitcrush", 0, 1, 0.01, "", (v) => v.toFixed(2), "해상도를 낮춰 8비트 레트로. 0이면 끔.");
+  slider("코러스", "chorus", 0, 1, 0.01, "", (v) => v.toFixed(2), "복사본을 겹쳐 넓고 몽환적으로. 0이면 끔.");
 
-  section("흔들림 (모듈레이션)");
-  slider("비브라토", "vibrato", 0, 1, 0.01, "", (v) => v.toFixed(2), "음정이 규칙적으로 위아래로 살짝 떨려요(성악가의 바이브레이션). 0이면 끔.");
-  slider("트레모로", "tremolo", 0, 1, 0.01, "", (v) => v.toFixed(2), "볼륨이 규칙적으로 커졌다 작아졌다 떨려요(빠른 '와와와'). 0이면 끔.");
+  section("흔들림 (모듈레이션)", false);
+  slider("비브라토", "vibrato", 0, 1, 0.01, "", (v) => v.toFixed(2), "음정이 규칙적으로 떨림. 0이면 끔.");
+  slider("트레모로", "tremolo", 0, 1, 0.01, "", (v) => v.toFixed(2), "볼륨이 규칙적으로 떨림. 0이면 끔.");
 
   section("");
   slider("볼륨", "volume", -30, 0, 1, "dB", (v) => Math.round(v), "이 소리의 크기.");
@@ -2212,12 +2217,35 @@ function openSoundEditor(sound) {
 
   modal.hidden = false;
 
-  function section(title) {
-    const h = document.createElement("div");
-    h.className = "synth-section";
-    h.textContent = title;
-    if (!title) h.classList.add("blank");
-    modalBody.appendChild(h);
+  // 접었다 폈다 하는 설정 그룹. title이 없으면 그룹 없이(볼륨 등) modalBody에 바로 담는다.
+  function section(title, open = true) {
+    if (!title) {
+      const h = document.createElement("div");
+      h.className = "synth-section blank";
+      modalBody.appendChild(h);
+      curBody = modalBody;
+      return;
+    }
+    const group = document.createElement("div");
+    group.className = "synth-group" + (open ? "" : " collapsed");
+    const head = document.createElement("button");
+    head.type = "button";
+    head.className = "synth-group-head";
+    head.setAttribute("aria-expanded", String(open));
+    const t = document.createElement("span");
+    t.className = "synth-group-title"; t.textContent = title;
+    const arrow = document.createElement("span");
+    arrow.className = "synth-group-arrow"; arrow.textContent = "▾";
+    head.append(t, arrow);
+    const body = document.createElement("div");
+    body.className = "synth-group-body";
+    head.addEventListener("click", () => {
+      const collapsed = group.classList.toggle("collapsed");
+      head.setAttribute("aria-expanded", String(!collapsed));
+    });
+    group.append(head, body);
+    modalBody.appendChild(group);
+    curBody = body; // 이후 addField는 이 그룹 안으로 들어간다
   }
   // help가 있으면 라벨 옆에 ? 버튼을 달고, 누르면 아래로 설명이 펼쳐진다.
   function addField(label, control, help) {
@@ -2242,7 +2270,7 @@ function openSoundEditor(sound) {
       wrap.appendChild(head);
     }
     wrap.appendChild(control);
-    modalBody.appendChild(wrap);
+    curBody.appendChild(wrap); // 현재 열린 그룹(또는 modalBody)에 담는다
   }
   function slider(label, key, min, max, step, unit, fmt, help) {
     const control = document.createElement("div");

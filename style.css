@@ -663,6 +663,32 @@ footer { margin-top: 14px; color: var(--muted); font-size: 12px; }
   border-bottom: 1px solid var(--line);
 }
 .synth-section.blank { border: 0; margin: 10px 0 0; padding: 0; }
+/* 맨 위 미리듣기 버튼(설정값 위) */
+.synth-preview-top {
+  display: block; width: 100%;
+  margin: 10px 0 4px;
+  padding: 10px;
+  font-size: 15px; font-weight: 600;
+  background: var(--accent); color: #0b1020;
+  border: 0; border-radius: 10px; cursor: pointer;
+}
+.synth-preview-top:hover { filter: brightness(1.06); }
+/* 접었다 폈다 하는 설정 그룹 */
+.synth-group { margin: 12px 0 0; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.synth-group-head {
+  width: 100%;
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 10px 12px;
+  background: var(--panel2);
+  border: 0; color: var(--text);
+  font-size: 13px; font-weight: 700; letter-spacing: .02em;
+  cursor: pointer; text-align: left;
+}
+.synth-group-head:hover { color: var(--accent); }
+.synth-group-arrow { flex: 0 0 auto; font-size: 11px; color: var(--muted); transition: transform .15s ease; }
+.synth-group.collapsed .synth-group-arrow { transform: rotate(-90deg); }
+.synth-group-body { padding: 12px 12px 2px; }
+.synth-group.collapsed .synth-group-body { display: none; }
 /* 라벨 옆 ? 도움말 버튼 */
 .help-btn {
   flex: 0 0 auto;
