@@ -7,7 +7,7 @@
   <!-- 소리 엔진: Tone.js (Web Audio API 위에서 악기·타이밍·재생을 다룸) -->
   <script src="https://unpkg.com/tone@14.8.49/build/Tone.js"></script>
   <!-- ?v= 는 배포마다 올린다: 브라우저·GitHub Pages 캐시로 옛 버전이 남는 것을 막는다 -->
-  <link rel="stylesheet" href="style.css?v=91" />
+  <link rel="stylesheet" href="style.css?v=92" />
 </head>
 <body>
   <!-- 왼쪽에서 밀려나오는 세션(내 곡) 목록 + 메뉴 -->
@@ -39,7 +39,7 @@
       <div class="transport">
         <button id="saveSong">💾 저장됨</button>
         <button id="editMode" title="편집 모드 — 켜야 노트/트랙을 수정할 수 있습니다">✏️ 편집</button>
-        <button id="playHere" title="타임라인 핸들 위치에서 재생(다시 누르면 정지)">▶ 재생</button>
+        <button id="playHere" title="재생(다시 누르면 일시정지 — 위치를 유지해 이어서 재생)">▶ 재생</button>
         <button id="syncScroll" title="켜면 가로로 이동할 때 모든 트랙이 같이 움직입니다">🔒 트랙 고정</button>
         <!-- 노트 격자 줌: 가로(폭)·세로(높이) -->
         <div class="zoom-ctl" title="노트를 양옆으로 확대/축소 · 넓히면 반박자(반칸)를 넣을 수 있어요">
@@ -120,6 +120,6 @@
     </div>
   </div>
 
-  <script src="app.js?v=91"></script>
+  <script src="app.js?v=92"></script>
 </body>
 </html>

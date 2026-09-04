@@ -1270,10 +1270,8 @@ function highlightColumn(col) {
 
 // ── 재생 위치(플레이헤드) + 타임라인 ────────────────────────────
 let playheadStep = 0;   // '현재 시점' — 여기서 재생 시작. 재생 중엔 진행 위치를 따라 움직인다.
-let playStartStep = 0;  // 이번 재생이 시작된 자리. 정지하면 여기로 되돌려 다시 재생하면 같은 곳부터.
 let playing = false;
-let paused = false;   // 일시정지 상태(Transport.pause, 위치 유지). '현재' 버튼으로 이어재생.
-let pausedStep = -1;  // 일시정지한 스텝. 이어서 할 때 핸들이 이 자리 그대로면 끊김 없이, 옮겼으면 그 자리에서 새로.
+let pausedStep = -1;    // 일시정지한 위치. 다시 재생할 때 핸들이 그대로면 이어서, 옮겼으면 그 자리부터.
 const timelineEl = document.getElementById("timeline");
 const tlFill = document.getElementById("tlFill");
 const tlHandle = document.getElementById("tlHandle");
@@ -1443,7 +1441,7 @@ function deserialize(data) {
   for (const td of data.tracks || []) tracks.push(makeTrackObj(td.type, td));
   render();
   rebuildSequence();
-  playheadStep = 0; playing = false; paused = false; updateTimeline(); hideEditMarker(); // 곡을 열면 재생 위치는 처음으로
+  playheadStep = 0; playing = false; pausedStep = -1; updateTimeline(); hideEditMarker(); // 곡을 열면 재생 위치는 처음으로
   loading = false;
 }
 
@@ -1728,36 +1726,49 @@ function setBpm(v, opts = {}) {
 }
 
 const btnPlayHere = document.getElementById("playHere");
-// 재생 버튼 라벨: 재생 중=정지, 멈춤=재생 (재생/정지 토글).
+// 라벨: 재생 중이면 '정지'(누르면 일시정지), 멈춰 있으면 '재생'.
 function updateTransportButtons() {
-  btnPlayHere.textContent = playing ? "⏹ 정지" : "▶ 재생";
+  btnPlayHere.textContent = playing ? "⏸ 정지" : "▶ 재생";
 }
-// 정지: 재생을 멈추고 핸들을 '재생 시작 위치'로 되돌린다 → 다시 재생하면 같은 곳부터(반복 재생 명확).
-function stopPlayback() {
-  Tone.Transport.stop();
-  if (seq) seq.stop();
-  playing = false; paused = false;
-  setPlayhead(playStartStep); // 진행하며 움직인 핸들을 시작 자리로 복귀
+// '정지' = 일시정지: 위치를 그대로 둔 채 멈춘다. 다시 재생하면 그 자리부터 이어진다.
+function pausePlayback() {
+  Tone.Transport.pause();
+  playing = false;
+  pausedStep = playheadStep; // 멈춘 위치 기억(다시 재생 때 이어질지 판단)
+  updateTimeline();          // 핸들은 멈춘 자리 그대로
   updateTransportButtons();
 }
+// 지정 위치부터 새로 재생.
 async function playFrom(fromStep) {
   await Tone.start();
   Tone.Transport.bpm.value = Number(bpm.value);
-  paused = false;
   Tone.Transport.stop();
   if (seq) seq.stop();
   rebuildSequence();
   const N = Math.max(0, Math.min(steps - 1, Math.round(fromStep)));
-  playStartStep = N;                  // 정지 때 이 자리로 돌아온다
   setPlayhead(N);
   playing = true;
+  pausedStep = -1;
   seq.start("+0.06");                 // 첫 이벤트를 살짝 뒤로 → 시작 순간 '과거 시각' 스케줄 경고 방지
   // 시작 위치 = N번째 16분음표(초 단위). 시각 격자(마디/박)와 무관하게 셀은 항상 16분음표다.
   Tone.Transport.start("+0.05", N * Tone.Time("16n").toSeconds());
   updateTransportButtons();
 }
-// 재생/정지 토글: 재생 중이면 정지, 아니면 핸들 위치부터 재생.
-btnPlayHere.addEventListener("click", () => { if (playing) stopPlayback(); else playFrom(playheadStep); });
+// 재생 버튼(하나): 재생 중이면 일시정지, 멈춰 있으면 재생/이어서.
+async function togglePlay() {
+  if (playing) { pausePlayback(); return; }
+  // 일시정지 상태에서 핸들을 안 옮겼으면 끊김 없이 이어서
+  if (Tone.Transport.state === "paused" && playheadStep === pausedStep) {
+    await Tone.start();
+    playing = true; pausedStep = -1;
+    Tone.Transport.start("+0.05");
+    updateTransportButtons();
+    return;
+  }
+  // 처음 재생, 또는 일시정지 중 핸들을 옮겼으면 그 위치부터 새로
+  playFrom(playheadStep);
+}
+btnPlayHere.addEventListener("click", togglePlay);
 bpm.addEventListener("input", () => setBpm(bpm.value));
 // 숫자 입력: 타이핑 중엔 필드를 건드리지 않고(범위 내면 반영), 확정(blur/Enter) 때 클램프
 bpmNum.addEventListener("input", () => {
