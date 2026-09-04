@@ -172,13 +172,13 @@ git add -A && git commit -m "..." && git push
 ## 링크 공유 코덱 (다른 기기)
 
 - 서버 없이 곡을 **URL 해시**(`#song=<base64url>`)에 담는다. 격자가 불리언이라 **비트로 패킹**(짧게 유지).
-- **버전 6**(현재, `encodeShare`가 항상 씀):
-  `[6][곡이름][bpm][bars] [소리수]{ [이름][음색7B] } [트랙수]{ [instr][muted][volume][이름][격자비트][반칸비트] }`.
+- **버전 7**(현재, `encodeShare`가 항상 씀):
+  `[7][곡이름][bpm][bars] [소리수]{ [이름][음색7B] } [트랙수]{ [instr][muted][volume][reverb][이름][격자비트][반칸비트] }`.
   - 음색 7바이트 = 파형1 + ADSR4 + 컷오프1 + 볼륨1 (`q8`/`dq8` 양자화).
   - 트랙 `instr`: 0~5 = 기본 악기(`BUILTIN`=`[piano,synth,pluck,bass,guitar,wind]`), 200 = 드럼, 100+idx = `sounds[idx]`.
-  - 트랙 `volume` 1바이트(`TRACK_VOL` 범위). 멜로디 격자 줄 수: v4+ = 37, v1~v3 = 13(`melodyRows`).
-  - **v6 반칸 격자**: `grid` 바로 뒤에 같은 크기의 `half` 격자를 `packGrid`로 이어 붙인다(트랙마다 바이트 정렬). `줌`은 안 담김(뷰).
-- **하위호환**: `decodeShare`가 v1~v6을 모두 처리한다(v1/v2=소리 섹션 없음, v3=멜로디 13줄, v5=볼륨 추가, v6=반칸 격자 추가. v5 이하는 `half=null`).
+  - 트랙 `volume` 1바이트(`TRACK_VOL` 범위), `muted`·`reverb` 각 1바이트(0/1). 멜로디 격자 줄 수: v4+ = 37, v1~v3 = 13(`melodyRows`).
+  - **v6 반칸 격자**: `grid` 바로 뒤에 같은 크기의 `half` 격자를 `packGrid`로 이어 붙인다(트랙마다 바이트 정렬). **v7 잔향**: `volume` 뒤 `reverb` 1바이트. `줌`은 안 담김(뷰).
+- **하위호환**: `decodeShare`가 v1~v7을 모두 처리한다(v1/v2=소리 섹션 없음, v3=멜로디 13줄, v5=볼륨 추가, v6=반칸 격자 추가, v7=잔향 추가. v5 이하는 `half=null`, v6 이하는 `reverb=false`).
   구버전 `custom` 트랙·13줄 멜로디는 `deserialize`→`makeTrackObj`가 소리 라이브러리·새 음역으로 마이그레이션.
   **포맷을 또 바꾸면 버전 바이트를 올리고 옛 버전 디코드를 남겨 둘 것.**
 - 링크 접속 시 `importFromHash`가 그 곡을 **새 세션으로 담고** 열고, 주소창 코드는 `history.replaceState`로 정리.

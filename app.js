@@ -1923,7 +1923,7 @@ function packGrid(bytes, grid) {
 // 원시 바이트(base64 전)를 돌려준다 — 공유 URL 만들 때 필요하면 gzip으로 압축한다.
 function encodeShareBytes(name, data) {
   const bytes = [];
-  bytes.push(6);
+  bytes.push(7);
   pushName(bytes, name);
   bytes.push(Math.max(0, Math.min(255, data.bpm || 120)));
   bytes.push(data.bars);
@@ -1945,6 +1945,7 @@ function encodeShareBytes(name, data) {
     bytes.push(ib);
     bytes.push(t.muted ? 1 : 0);
     bytes.push(q8(t.volume ?? 0, TRACK_VOL)); // v5: 트랙 볼륨
+    bytes.push(t.reverb ? 1 : 0);             // v7: 트랙 잔향(리버브)
     pushName(bytes, t.name);
     packGrid(bytes, t.grid);                          // 칸(16분음표) 격자
     const emptyHalf = t.grid.map((row) => row.map(() => false));
@@ -1968,7 +1969,7 @@ function decodeShareBytes(b) {
   });
 
   const ver = b[i++];
-  if (![1, 2, 3, 4, 5, 6].includes(ver)) throw new Error("알 수 없는 공유 버전");
+  if (![1, 2, 3, 4, 5, 6, 7].includes(ver)) throw new Error("알 수 없는 공유 버전");
   const name = readName();
   const bpm = b[i++];
   const bars = b[i++];
@@ -2009,11 +2010,12 @@ function decodeShareBytes(b) {
       else { type = "melody"; instrument = BUILTIN[ib] || "piano"; }
       const muted = b[i++] === 1;
       const volume = ver >= 5 ? dq8(b[i++], TRACK_VOL) : 0;
+      const reverb = ver >= 7 ? (b[i++] === 1) : false; // v7: 트랙 잔향
       const tname = readName();
       const nrows = type === "drums" ? DRUM_ROWS.length : melodyRows;
       const grid = readGrid(nrows);
       const half = ver >= 6 ? readGrid(nrows) : null; // v6: 반칸(32분음표) 격자
-      tracks.push({ type, instrument, name: tname, muted, volume, grid, half });
+      tracks.push({ type, instrument, name: tname, muted, volume, reverb, grid, half });
     } else {
       // v1/v2 레거시: [type][instr][muted][name] (v2 custom이면 음색 7B) [grid]
       const type = b[i++] === 1 ? "drums" : "melody";
