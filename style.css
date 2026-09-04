@@ -442,6 +442,10 @@ button.primary { background: var(--accent); color: #0b1020; font-weight: 600; bo
   box-shadow: 6px 0 6px -4px rgba(0, 0, 0, .35); /* 고정 라벨과 격자 사이 살짝 그림자로 경계 */
 }
 .label-cell.sharp { color: #6b7180; }
+/* 음 이름을 눌러 소리 듣기 — 편집 잠금과 무관하게 항상 클릭 가능 */
+.label-cell.playable { cursor: pointer; }
+.label-cell.playable:hover { color: var(--text); background: var(--panel2); }
+.label-cell.playable:active { background: var(--accent); color: #0b1020; }
 .cell {
   background: #191c24;
   min-width: 30px;

@@ -675,8 +675,11 @@ function renderTrack(track) {
 
   rows.forEach((rowName, r) => {
     const label = document.createElement("div");
-    label.className = "label-cell" + (track.type === "melody" && isSharp(rowName) ? " sharp" : "");
+    label.className = "label-cell playable" + (track.type === "melody" && isSharp(rowName) ? " sharp" : "");
     label.textContent = rowName;
+    label.title = "눌러서 이 음 소리 듣기";
+    // 음 이름을 누르면 그 줄의 소리를 미리 듣는다(편집 잠금과 무관 — 수정이 아니라 소리 확인).
+    label.addEventListener("click", async () => { await Tone.start(); preview(track, r); });
     grid.appendChild(label);
 
     track.cellEls[r] = [];
