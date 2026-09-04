@@ -395,12 +395,12 @@ function setTrackReverb(track, on) {
   if (rv) rv.wet.value = on ? REVERB_WET : 0;
 }
 
-function triggerTrack(track, col, time) {
-  if (track.muted) return;
+// 한 격자(grid 또는 half)의 col 열에 켜진 노트를 time에 울린다.
+function playCellsAt(track, gridArr, col, time) {
   const rows = track.type === "drums" ? DRUM_ROWS : MELODY_NOTES;
   if (track.type === "drums") {
     for (let r = 0; r < rows.length; r++) {
-      if (!track.grid[r][col]) continue;
+      if (!gridArr[r][col]) continue;
       const s = track.synth;
       if (rows[r] === "킥") s.hitKick(time);
       else if (rows[r] === "스네어") s.hitSnare(time);
@@ -408,9 +408,15 @@ function triggerTrack(track, col, time) {
     }
   } else {
     const notesOn = [];
-    for (let r = 0; r < rows.length; r++) if (track.grid[r][col]) notesOn.push(rows[r]);
+    for (let r = 0; r < rows.length; r++) if (gridArr[r][col]) notesOn.push(rows[r]);
     if (notesOn.length) track.synth.poly.triggerAttackRelease(notesOn, track.synth.noteDur || "16n", time);
   }
+}
+const HALF_STEP = () => Tone.Time("32n").toSeconds(); // 반칸 = 한 칸(16분음표)의 절반(32분음표)
+function triggerTrack(track, col, time) {
+  if (track.muted) return;
+  playCellsAt(track, track.grid, col, time);
+  if (track.half) playCellsAt(track, track.half, col, time + HALF_STEP()); // 반칸 노트는 32분음표 뒤에
 }
 
 function preview(track, r) {
@@ -450,20 +456,25 @@ function makeTrackObj(type, data) {
     volume: data?.volume ?? 0,
     reverb: data?.reverb ?? false,
     grid: null,
+    half: null,          // 반칸(32분음표) 노트: half[r][c] = 칸 c의 중간(32분음표 뒤)에 노트 시작
     synth: null,
     cellEls: null,
   };
   // 격자: 빈 격자를 만들고, 저장값이 있으면 채운다.
   track.grid = rows.map(() => new Array(steps).fill(false));
+  track.half = rows.map(() => new Array(steps).fill(false));
   const src = data?.grid;
   if (src) {
     // 예전 저장은 멜로디가 13줄(C5..C4)이었다. 줄 수가 다르면 음이름으로 새 음역에 맞춰 옮긴다.
     const legacy = type === "melody" && src.length === LEGACY_MELODY_NOTES.length && rows.length !== src.length;
+    const sh = data?.half; // 반칸 격자(있으면 grid와 같은 줄 배치). 레거시 곡엔 없음.
     for (let sr = 0; sr < src.length; sr++) {
       const tr = legacy ? rows.indexOf(LEGACY_MELODY_NOTES[sr]) : sr;
       if (tr < 0 || tr >= rows.length) continue;
       const savedRow = src[sr] || [];
       for (let c = 0; c < steps && c < savedRow.length; c++) track.grid[tr][c] = !!savedRow[c];
+      const savedHalf = (sh && sh[sr]) || null;
+      if (savedHalf) for (let c = 0; c < steps && c < savedHalf.length; c++) track.half[tr][c] = !!savedHalf[c];
     }
   }
   track.synth = buildSynth(track);
@@ -512,10 +523,13 @@ function startTrackRename(head, nameSpan, renBtn, track) {
 function resizeAll() {
   steps = bars * barCells();
   for (const t of tracks) {
-    for (let r = 0; r < t.grid.length; r++) {
-      const row = t.grid[r];
-      if (row.length < steps) while (row.length < steps) row.push(false);
-      else row.length = steps;
+    for (const g of [t.grid, t.half]) {
+      if (!g) continue;
+      for (let r = 0; r < g.length; r++) {
+        const row = g[r];
+        if (row.length < steps) while (row.length < steps) row.push(false);
+        else row.length = steps;
+      }
     }
   }
   render();
@@ -612,6 +626,7 @@ function renderTrack(track) {
       track.type = newType;
       const nrows = newType === "drums" ? DRUM_ROWS : MELODY_NOTES;
       track.grid = nrows.map(() => new Array(steps).fill(false));
+      track.half = nrows.map(() => new Array(steps).fill(false));
     }
     track.instrument = newType === "drums" ? null : v; // v는 기본악기 또는 "snd:<id>"
     track.synth = buildSynth(track);
@@ -692,8 +707,8 @@ function renderTrack(track) {
   if (collapsed) return wrap; // 접힘: 헤더(이름·음원·음소거·순서)만, 격자는 그리지 않음
 
   const grid = document.createElement("div");
-  grid.className = "grid in-scroller"; // 스크롤은 바깥 hscroll/vscroll이 맡는다
-  grid.style.gridTemplateColumns = `auto repeat(${steps}, 1fr)`;
+  grid.className = "grid in-scroller" + (splitOn() ? " zoomed" : ""); // 스크롤은 바깥 hscroll/vscroll이 맡는다
+  grid.style.gridTemplateColumns = `auto repeat(${steps}, ${zoomW}px)`; // 줌: 칸 너비 고정 → 넘치면 가로 스크롤
 
   rows.forEach((rowName, r) => {
     const label = document.createElement("div");
@@ -714,6 +729,7 @@ function renderTrack(track) {
       if (c % barCells() === 0) cell.classList.add("bar");
       else if (c % beatUnit === 0) cell.classList.add("beat");
       if (track.grid[r][c]) cell.classList.add("on");
+      if (track.half && track.half[r][c]) cell.classList.add("half-on"); // 반칸(32분음표) 노트 — 줌과 무관하게 항상 표시
       cell._r = r; cell._c = c; cell._track = track; // 탭 위임·이동 모드에서 좌표/트랙 조회
       grid.appendChild(cell);
       track.cellEls[r][c] = cell;
@@ -815,6 +831,38 @@ function hintLocked() { // 잠금 상태에서 편집을 시도하면 안내(과
   showToast("편집모드 비활성화");
 }
 
+// ══════════════════════════════════════════════════════════════
+//  가로 줌 — 칸(노트) 너비를 조절. 일정 이상 확대되면 칸을 반으로 쪼개(32분음표)
+//  '반칸' 노트를 넣을 수 있다(칸 가운데 얇은 선 + 오른쪽 절반 클릭). 곡 내용 아닌 뷰 상태.
+// ══════════════════════════════════════════════════════════════
+const ZOOM_WIDTHS = [28, 36, 44, 60, 84, 120]; // 칸 너비 단계(px)
+const SPLIT_MIN = 60;   // 이 너비 이상이면 반칸 분할이 켜진다
+let zoomIdx = 2;        // 기본 44px
+let zoomW = ZOOM_WIDTHS[zoomIdx];
+const splitOn = () => zoomW >= SPLIT_MIN; // 반칸(32분음표) 넣기 가능 여부
+function applyZoom() {
+  zoomW = ZOOM_WIDTHS[zoomIdx];
+  render();
+  updateZoomUI();
+  markDirty();
+}
+function zoomStep(dir) {
+  const ni = Math.max(0, Math.min(ZOOM_WIDTHS.length - 1, zoomIdx + dir));
+  if (ni === zoomIdx) return;
+  zoomIdx = ni;
+  applyZoom();
+}
+const zoomOutBtn = document.getElementById("zoomOut");
+const zoomInBtn = document.getElementById("zoomIn");
+const zoomLbl = document.getElementById("zoomLbl");
+function updateZoomUI() {
+  if (zoomOutBtn) zoomOutBtn.disabled = zoomIdx <= 0;
+  if (zoomInBtn) zoomInBtn.disabled = zoomIdx >= ZOOM_WIDTHS.length - 1;
+  if (zoomLbl) zoomLbl.textContent = splitOn() ? "반박자 ✓" : "노트 폭";
+}
+if (zoomOutBtn) zoomOutBtn.addEventListener("click", () => zoomStep(-1));
+if (zoomInBtn) zoomInBtn.addEventListener("click", () => zoomStep(1));
+
 const TAP_SLOP = 12; // 이 픽셀 이내로 움직인 손뗌은 탭으로 본다(스크롤/드래그와 구분).
 const HOLD_MS = 600; // 기존 노트를 이만큼 '길게 눌러야' 드래그 이동(수정)이 켜진다(실수 이동 방지).
 function clearHold(tap) { // 길게누르기 타이머 해제 + '이동 준비' 표시 제거
@@ -856,11 +904,18 @@ function enableCellTap(grid, track) {
     if (r == null || c == null) return;
     // 진짜 탭(움직임 없는 손뗌)인데 편집이 잠겨 있으면 → 여기서만 안내(스크롤/터치엔 안 뜸).
     if (!editMode) { hintLocked(); return; }
-    track.grid[r][c] = !track.grid[r][c];
-    cell.classList.toggle("on", track.grid[r][c]);
+    // 반칸 분할: 줌인(splitOn)일 때 칸의 오른쪽 절반을 누르면 반칸(half=32분음표) 노트, 왼쪽 절반/줌아웃이면 기존처럼 한 칸.
+    let useHalf = false;
+    if (splitOn()) {
+      const rect = cell.getBoundingClientRect();
+      if (t.x >= rect.left + rect.width / 2) useHalf = true;
+    }
+    const arr = useHalf ? track.half : track.grid;
+    arr[r][c] = !arr[r][c];
+    cell.classList.toggle(useHalf ? "half-on" : "on", arr[r][c]);
     showEditMarker(c); // 찍은 칸이 플레이바 어디인지 별도 표식(재생 핸들은 안 옮김)
     // pointerup은 사용자 제스처 → 오디오 컨텍스트를 켠 뒤 미리듣기(첫 음 무음 방지).
-    if (track.grid[r][c]) { await Tone.start(); preview(track, r); }
+    if (arr[r][c]) { await Tone.start(); preview(track, r); }
     markDirty();
   });
 }
@@ -1245,6 +1300,7 @@ function serialize() {
     bars,
     beatUnit,
     barBeats,
+    zoom: zoomIdx,   // 가로 줌 단계(뷰 상태) — 공유 링크엔 안 담김
     sounds: soundLib.map((s) => ({ ...s })), // 커스텀 소리 라이브러리
     tracks: tracks.map((t) => ({
       type: t.type,
@@ -1255,6 +1311,7 @@ function serialize() {
       volume: t.volume ?? 0,
       reverb: !!t.reverb,
       grid: t.grid.map((row) => row.slice()),
+      half: (t.half || []).map((row) => row.slice()), // 반칸(32분음표) 노트
     })),
   };
 }
@@ -1273,6 +1330,9 @@ function deserialize(data) {
   bars = data.bars || 2;
   beatUnit = data.beatUnit || 4;
   barBeats = data.barBeats || 4;
+  zoomIdx = Math.max(0, Math.min(ZOOM_WIDTHS.length - 1, data.zoom ?? 2)); // 줌 복원(뷰)
+  zoomW = ZOOM_WIDTHS[zoomIdx];
+  updateZoomUI();
   steps = bars * barCells();
   if (beatInput) beatInput.value = beatUnit;
   if (barInput) barInput.value = barBeats;
@@ -1758,10 +1818,21 @@ function pushSoundParams(bytes, s) {
 
 const TRACK_VOL = [-30, 6]; // 트랙 볼륨 dB 범위(공유 링크 양자화용)
 
-// 버전 5: 트랙 볼륨 추가. (v1~v4 링크도 decodeShare가 계속 연다)
+// 격자(불리언 2차원)를 비트로 패킹 — 트랙마다 바이트 정렬(readGrid가 ceil(rows*steps/8)바이트로 읽음).
+function packGrid(bytes, grid) {
+  let cur = 0, nb = 0;
+  for (let r = 0; r < grid.length; r++)
+    for (let c = 0; c < grid[r].length; c++) {
+      cur = (cur << 1) | (grid[r][c] ? 1 : 0);
+      if (++nb === 8) { bytes.push(cur); cur = 0; nb = 0; }
+    }
+  if (nb > 0) bytes.push(cur << (8 - nb));
+}
+
+// 버전 6: 반칸(32분음표) 격자 추가. (v1~v5 링크도 decodeShare가 계속 연다)
 function encodeShare(name, data) {
   const bytes = [];
-  bytes.push(5);
+  bytes.push(6);
   pushName(bytes, name);
   bytes.push(Math.max(0, Math.min(255, data.bpm || 120)));
   bytes.push(data.bars);
@@ -1784,14 +1855,9 @@ function encodeShare(name, data) {
     bytes.push(t.muted ? 1 : 0);
     bytes.push(q8(t.volume ?? 0, TRACK_VOL)); // v5: 트랙 볼륨
     pushName(bytes, t.name);
-    // 격자 비트 패킹
-    let cur = 0, nb = 0;
-    for (let r = 0; r < t.grid.length; r++)
-      for (let c = 0; c < t.grid[r].length; c++) {
-        cur = (cur << 1) | (t.grid[r][c] ? 1 : 0);
-        if (++nb === 8) { bytes.push(cur); cur = 0; nb = 0; }
-      }
-    if (nb > 0) bytes.push(cur << (8 - nb));
+    packGrid(bytes, t.grid);                          // 칸(16분음표) 격자
+    const emptyHalf = t.grid.map((row) => row.map(() => false));
+    packGrid(bytes, t.half && t.half.length ? t.half : emptyHalf); // v6: 반칸(32분음표) 격자
   }
   return bytesToB64url(Uint8Array.from(bytes));
 }
@@ -1811,7 +1877,7 @@ function decodeShare(code) {
   });
 
   const ver = b[i++];
-  if (![1, 2, 3, 4, 5].includes(ver)) throw new Error("알 수 없는 공유 버전");
+  if (![1, 2, 3, 4, 5, 6].includes(ver)) throw new Error("알 수 없는 공유 버전");
   const name = readName();
   const bpm = b[i++];
   const bars = b[i++];
@@ -1853,8 +1919,10 @@ function decodeShare(code) {
       const muted = b[i++] === 1;
       const volume = ver >= 5 ? dq8(b[i++], TRACK_VOL) : 0;
       const tname = readName();
-      const grid = readGrid(type === "drums" ? DRUM_ROWS.length : melodyRows);
-      tracks.push({ type, instrument, name: tname, muted, volume, grid });
+      const nrows = type === "drums" ? DRUM_ROWS.length : melodyRows;
+      const grid = readGrid(nrows);
+      const half = ver >= 6 ? readGrid(nrows) : null; // v6: 반칸(32분음표) 격자
+      tracks.push({ type, instrument, name: tname, muted, volume, grid, half });
     } else {
       // v1/v2 레거시: [type][instr][muted][name] (v2 custom이면 음색 7B) [grid]
       const type = b[i++] === 1 ? "drums" : "melody";
@@ -2348,20 +2416,25 @@ document.getElementById("share").addEventListener("click", openShareModal);
 function scheduleTrackOffline(track, voices, secondsPerStep) {
   if (track.muted) return;
   const rows = track.type === "drums" ? DRUM_ROWS : MELODY_NOTES;
-  for (let c = 0; c < steps; c++) {
-    const time = c * secondsPerStep + 0.001; // 0에 딱 붙이면 첫 음이 씹혀서 살짝 민다
+  const halfOff = secondsPerStep / 2; // 반칸 = 한 칸(16분음표)의 절반 뒤
+  const fire = (gridArr, c, time) => {
     if (track.type === "drums") {
       for (let r = 0; r < rows.length; r++) {
-        if (!track.grid[r][c]) continue;
+        if (!gridArr[r][c]) continue;
         if (rows[r] === "킥") voices.hitKick(time);
         else if (rows[r] === "스네어") voices.hitSnare(time);
         else voices.hitHat(time);
       }
     } else {
       const notes = [];
-      for (let r = 0; r < rows.length; r++) if (track.grid[r][c]) notes.push(rows[r]);
+      for (let r = 0; r < rows.length; r++) if (gridArr[r][c]) notes.push(rows[r]);
       if (notes.length) voices.poly.triggerAttackRelease(notes, voices.noteDur || secondsPerStep, time);
     }
+  };
+  for (let c = 0; c < steps; c++) {
+    const time = c * secondsPerStep + 0.001; // 0에 딱 붙이면 첫 음이 씹혀서 살짝 민다
+    fire(track.grid, c, time);
+    if (track.half) fire(track.half, c, time + halfOff);
   }
 }
 
@@ -2613,3 +2686,4 @@ if (importedId) {
 }
 
 setEditMode(false); // 시작은 편집 잠금(안전) — ✏️ 버튼으로 켠다
+updateZoomUI();     // 줌 버튼 활성/비활성·라벨 초기화

@@ -139,6 +139,20 @@ body.locked .cell { touch-action: pan-x pan-y !important; } /* 잠금 땐 노트
   font-weight: 600;
 }
 
+/* ── 가로 줌 컨트롤 ── */
+.zoom-ctl {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel2);
+}
+.zoom-lbl { font-size: 12px; color: var(--muted); white-space: nowrap; }
+.zoom-ctl button { padding: 5px 8px; font-size: 14px; }
+.zoom-ctl button:disabled { opacity: .35; cursor: default; }
+
 /* ── 신디사이저: 악기 프리셋 버튼 ── */
 .preset-grid {
   display: grid;
@@ -473,19 +487,46 @@ button.primary { background: var(--accent); color: #0b1020; font-weight: 600; bo
 .label-cell.playable:hover { color: var(--text); background: var(--panel2); }
 .label-cell.playable:active { background: var(--accent); color: #0b1020; }
 .cell {
+  position: relative;          /* 반칸 노트(::after)·가운데 분할선(::before) 기준 */
   background: #191c24;
-  min-width: 30px;
+  min-width: 0;                /* 줌 너비(gridTemplateColumns)가 칸 폭을 정한다 */
   height: 24px;
-  border-radius: 4px;
+  border-radius: 0;            /* 각지게 — 둥근 모서리는 박/마디 inset 선을 '{'처럼 휘게 만든다 */
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .09); /* 한박자(칸) 윤곽선 */
   cursor: pointer;
   /* 오래 눌러도(홀드) 텍스트 선택/롱프레스 메뉴가 떠서 탭을 삼키지 않게 */
   user-select: none;
   -webkit-user-select: none;
   -webkit-touch-callout: none;
 }
+/* 반칸(32분음표) 노트: 칸의 중간(반칸 뒤)에서 시작하되 길이는 한 칸 노트와 똑같다(반쪽 아님).
+   → 오른쪽으로 반 칸 밀린 온전한 노트로, 다음 칸 중간까지 이어진다. (길이 조절은 추후 기능) */
+.cell.half-on::after {
+  content: "";
+  position: absolute;
+  top: 0; bottom: 0; left: 50%;
+  width: calc(100% + 2px);   /* 한 칸 길이(칸 너비 + 격자 간격) */
+  background: var(--on);
+  border-radius: 0;
+  pointer-events: none;
+  z-index: 2;                /* 다음 칸 위로 그려지게 */
+}
+.cell.half-on { z-index: 2; }
+.cell.drum.half-on::after { background: var(--on-drum); }
+/* 줌인(반박자 모드): 칸 가운데 '연한' 분할선 — 한박자(칸/박) 구분선보다 약하게 둔다 */
+.grid.zoomed .cell::before {
+  content: "";
+  position: absolute;
+  top: 5px; bottom: 5px; left: 50%;
+  width: 1px;
+  background: rgba(255, 255, 255, .05);
+  pointer-events: none;
+}
 .cell.black-key { background: var(--black-key); }
-.cell.beat { box-shadow: inset 2px 0 0 #2f3442; }          /* 박자: 얕은 선 */
-.cell.bar { box-shadow: inset 3px 0 0 #59617a; }           /* 마디: 조금 더 굵고 밝은 선 */
+/* 박자: 칸 윤곽선 + 왼쪽 굵고 밝은 직선(뚜렷하게) */
+.cell.beat { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .09), inset 3px 0 0 #8b96b0; }
+/* 마디: 가장 굵고 밝은 직선 */
+.cell.bar { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .09), inset 4px 0 0 #c2c9d8; }
 .cell.on { background: var(--on); touch-action: none; } /* 노트 위 터치 드래그는 스크롤 대신 '노트 끌기' */
 .cell.on.drum { background: var(--on-drum); }
 /* 기존 노트 끌어 옮기기: 원래 자리는 반투명, 놓일 자리는 미리보기 */

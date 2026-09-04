@@ -143,9 +143,11 @@ git add -A && git commit -m "..." && git push
   name, muted,
   collapsed,                  // 헤더만 보이고 격자 숨김
   volume,                     // 트랙 볼륨 dB
-  grid: boolean[rows][steps], // rows: 멜로디=37(C6~C3 반음), 드럼=3. steps = bars*16
+  grid: boolean[rows][steps], // rows: 멜로디=37(C6~C3 반음), 드럼=3. steps = bars*16 (칸=16분음표)
+  half: boolean[rows][steps], // 반칸 노트: half[r][c]=칸 c의 중간(32분음표 뒤)에 노트 시작. 재생은 grid를 time, half를 time+32n에 울림.
 }
 ```
+- **가로 줌**(`zoomW`, 뷰 상태): 칸 너비(`ZOOM_WIDTHS` px)를 바꿔 `render`. `zoomW>=SPLIT_MIN`이면 `splitOn()` — 격자에 `.zoomed`(가운데 분할선), 탭 시 칸 오른쪽 절반=반칸(half). `zoom`(단계 idx)은 세션 저장, 공유 링크엔 안 담김.
 - 기본 악기: 피아노·신스·플럭·베이스는 `PolySynth(Tone.Synth)`, **기타(통기타)·클라리넷**은 `PolySynth(Tone.FMSynth)`.
 - **사운드는 트랙 헤더 드롭다운 하나로 고른다**: 기본 악기 + 내가 만든 소리들 + `🎹 소리 만들기·편집…` + 드럼.
   바꾸면 `track.instrument`가 바뀌고, **드럼↔멜로디처럼 줄 구성이 달라지는 전환은 그 트랙 격자를 새로 시작**한다
@@ -170,12 +172,13 @@ git add -A && git commit -m "..." && git push
 ## 링크 공유 코덱 (다른 기기)
 
 - 서버 없이 곡을 **URL 해시**(`#song=<base64url>`)에 담는다. 격자가 불리언이라 **비트로 패킹**(짧게 유지).
-- **버전 5**(현재, `encodeShare`가 항상 씀):
-  `[5][곡이름][bpm][bars] [소리수]{ [이름][음색7B] } [트랙수]{ [instr][muted][volume][이름][격자비트] }`.
+- **버전 6**(현재, `encodeShare`가 항상 씀):
+  `[6][곡이름][bpm][bars] [소리수]{ [이름][음색7B] } [트랙수]{ [instr][muted][volume][이름][격자비트][반칸비트] }`.
   - 음색 7바이트 = 파형1 + ADSR4 + 컷오프1 + 볼륨1 (`q8`/`dq8` 양자화).
   - 트랙 `instr`: 0~5 = 기본 악기(`BUILTIN`=`[piano,synth,pluck,bass,guitar,wind]`), 200 = 드럼, 100+idx = `sounds[idx]`.
   - 트랙 `volume` 1바이트(`TRACK_VOL` 범위). 멜로디 격자 줄 수: v4+ = 37, v1~v3 = 13(`melodyRows`).
-- **하위호환**: `decodeShare`가 v1~v5를 모두 처리한다(v1/v2=소리 섹션 없음, v3=멜로디 13줄, v5=볼륨 추가).
+  - **v6 반칸 격자**: `grid` 바로 뒤에 같은 크기의 `half` 격자를 `packGrid`로 이어 붙인다(트랙마다 바이트 정렬). `줌`은 안 담김(뷰).
+- **하위호환**: `decodeShare`가 v1~v6을 모두 처리한다(v1/v2=소리 섹션 없음, v3=멜로디 13줄, v5=볼륨 추가, v6=반칸 격자 추가. v5 이하는 `half=null`).
   구버전 `custom` 트랙·13줄 멜로디는 `deserialize`→`makeTrackObj`가 소리 라이브러리·새 음역으로 마이그레이션.
   **포맷을 또 바꾸면 버전 바이트를 올리고 옛 버전 디코드를 남겨 둘 것.**
 - 링크 접속 시 `importFromHash`가 그 곡을 **새 세션으로 담고** 열고, 주소창 코드는 `history.replaceState`로 정리.
