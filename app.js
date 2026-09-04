@@ -1727,30 +1727,21 @@ function setBpm(v, opts = {}) {
 }
 
 const btnPlayHere = document.getElementById("playHere");
-// 재생 버튼 라벨을 상태에 맞춰 갱신: 재생 중=일시정지, 일시정지=이어서, 멈춤=현재.
+// 재생 버튼 라벨: 재생 중=정지, 멈춤=재생 (재생/정지 토글).
 function updateTransportButtons() {
-  btnPlayHere.textContent = playing ? "⏸ 일시정지" : (paused ? "▶ 이어서" : "▶ 재생");
+  btnPlayHere.textContent = playing ? "⏹ 정지" : "▶ 재생";
 }
-function pausePlayback() {
-  Tone.Transport.pause();      // 위치를 유지한 채 멈춘다(이어재생 가능)
-  playing = false; paused = true;
-  pausedStep = playheadStep;   // 이 자리를 기억 — 이어서 할 때 핸들이 여기서 벗어났는지 본다
+// 정지: 재생을 멈추고 핸들은 멈춘 자리에 둔다(다시 재생하면 그 자리부터).
+function stopPlayback() {
+  Tone.Transport.stop();
+  if (seq) seq.stop();
+  playing = false; paused = false;
   updateTimeline();
   updateTransportButtons();
 }
-async function playFrom(fromStep, opts = {}) {
-  if (playing) { pausePlayback(); return; } // 재생 중 재생버튼 클릭 = 일시정지(토글)
+async function playFrom(fromStep) {
   await Tone.start();
   Tone.Transport.bpm.value = Number(bpm.value);
-  // 일시정지 상태에서 '현재(이어서)' → 핸들이 멈췄던 자리 그대로면 끊김 없이 Transport만 재개.
-  // 핸들을 옮겼으면(마디·박 위치 변경) 이 분기를 건너뛰어 아래에서 그 위치부터 새로 시작한다.
-  if (paused && opts.resume && playheadStep === pausedStep) {
-    paused = false; playing = true;
-    Tone.Transport.start("+0.05");
-    updateTransportButtons();
-    return;
-  }
-  // 새로 시작(처음부터, 또는 일시정지 중 옮긴 위치부터). 이전 상태가 paused여도 깨끗이 다시 놓는다.
   paused = false;
   Tone.Transport.stop();
   if (seq) seq.stop();
@@ -1763,7 +1754,8 @@ async function playFrom(fromStep, opts = {}) {
   Tone.Transport.start("+0.05", N * Tone.Time("16n").toSeconds());
   updateTransportButtons();
 }
-btnPlayHere.addEventListener("click", () => playFrom(playheadStep, { resume: true })); // 현재/이어서(재생 중이면 일시정지)
+// 재생/정지 토글: 재생 중이면 정지, 아니면 핸들 위치부터 재생.
+btnPlayHere.addEventListener("click", () => { if (playing) stopPlayback(); else playFrom(playheadStep); });
 bpm.addEventListener("input", () => setBpm(bpm.value));
 // 숫자 입력: 타이핑 중엔 필드를 건드리지 않고(범위 내면 반영), 확정(blur/Enter) 때 클램프
 bpmNum.addEventListener("input", () => {
