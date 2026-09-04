@@ -768,29 +768,40 @@ function enableDragScroll(scrollEl, flagEl, track) {
 // 이 방식의 장점: (1) 홀드 시간 제한 없음(오래 눌러도 찍힘), (2) 살짝 움직여도(≤슬롭) 찍힘,
 // (3) 터치에서 실제 스크롤이 시작되면 브라우저가 pointercancel을 주므로 스크롤과 확실히 구분된다.
 const TAP_SLOP = 12; // 이 픽셀 이내로 움직인 손뗌은 탭으로 본다(스크롤/드래그와 구분).
+const HOLD_MS = 600; // 기존 노트를 이만큼 '길게 눌러야' 드래그 이동(수정)이 켜진다(실수 이동 방지).
+function clearHold(tap) { // 길게누르기 타이머 해제 + '이동 준비' 표시 제거
+  if (!tap) return;
+  if (tap.holdTimer) { clearTimeout(tap.holdTimer); tap.holdTimer = null; }
+  if (tap.cell) tap.cell.classList.remove("note-armed");
+}
 function enableCellTap(grid, track) {
   let tap = null;
   grid.addEventListener("pointerdown", (e) => {
     if (moveMode && mvTrack === track) { moveDown(e, grid, track); return; } // 이 트랙 이동 모드
     const cell = e.target.closest(".cell");
-    tap = cell ? { id: e.pointerId, x: e.clientX, y: e.clientY, cell, moved: false, onCell: cell.classList.contains("on") } : null;
+    tap = cell ? { id: e.pointerId, x: e.clientX, y: e.clientY, cell, moved: false, onCell: cell.classList.contains("on"), armed: false, holdTimer: null } : null;
+    // 켜진 노트를 누르면 HOLD_MS 뒤 '이동 준비'(armed) — 그때부터 드래그하면 옮겨진다.
+    if (tap && tap.onCell && !moveMode) {
+      tap.holdTimer = setTimeout(() => { if (tap) { tap.armed = true; tap.cell.classList.add("note-armed"); } }, HOLD_MS);
+    }
   });
   grid.addEventListener("pointermove", (e) => {
     if (moveDrag && moveDrag.grid === grid) { moveMoveEv(e); return; }
     if (noteDrag && noteDrag.grid === grid && noteDrag.id === e.pointerId) { noteDragMove(e); return; }
     if (!tap || e.pointerId !== tap.id) return;
     if (Math.abs(e.clientX - tap.x) > TAP_SLOP || Math.abs(e.clientY - tap.y) > TAP_SLOP) {
-      tap.moved = true;
-      // 기존 노트를 눌러 드래그하면(일반 모드) 그 노트 하나만 끌어 옮긴다.
-      if (tap.onCell && !moveMode) { startNoteDrag(e, grid, track, tap.cell); tap = null; }
+      // 기존 노트를 '길게 누른 뒤(armed)' 드래그하면 그 노트 하나만 끌어 옮긴다.
+      if (tap.onCell && !moveMode && tap.armed) { clearHold(tap); startNoteDrag(e, grid, track, tap.cell); tap = null; }
+      else { clearHold(tap); tap.moved = true; } // 아직 준비 전 움직임 → 스크롤로 취급(노트 안 옮김)
     }
   });
-  grid.addEventListener("pointercancel", () => { tap = null; }); // 스크롤 시작 등 → 탭 취소
+  grid.addEventListener("pointercancel", () => { clearHold(tap); tap = null; }); // 스크롤 시작 등 → 탭 취소
   grid.addEventListener("pointerup", async (e) => {
     if (moveDrag && moveDrag.grid === grid) { moveUpEv(e, grid); return; }
     if (noteDrag && noteDrag.grid === grid && noteDrag.id === e.pointerId) { noteDragUp(e, grid); return; }
     if (!tap || e.pointerId !== tap.id) return;
-    const t = tap; tap = null;
+    const t = tap; clearHold(t); tap = null;
+    if (t.armed) return; // 길게 눌러 '집었다가' 제자리에서 뗌 → 삭제/토글 없이 그대로 둔다
     if (t.moved || grid._dragged) return; // 드래그(스크롤)면 음 안 찍음
     const cell = t.cell, r = cell._r, c = cell._c;
     if (r == null || c == null) return;
