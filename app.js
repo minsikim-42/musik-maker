@@ -698,7 +698,7 @@ function renderTrack(track) {
 
     const delBtn = document.createElement("button");
     delBtn.textContent = "삭제";
-    delBtn.addEventListener("click", () => removeTrack(track.id));
+    delBtn.addEventListener("click", () => { if (confirm("정말 트랙을 제거하시겠습니까?")) removeTrack(track.id); });
     head.appendChild(delBtn);
   }
 
@@ -1729,7 +1729,7 @@ function setBpm(v, opts = {}) {
 const btnPlayHere = document.getElementById("playHere");
 // 재생 버튼 라벨을 상태에 맞춰 갱신: 재생 중=일시정지, 일시정지=이어서, 멈춤=현재.
 function updateTransportButtons() {
-  btnPlayHere.textContent = playing ? "⏸ 일시정지" : (paused ? "▶ 이어서" : "▶ 현재");
+  btnPlayHere.textContent = playing ? "⏸ 일시정지" : (paused ? "▶ 이어서" : "▶ 재생");
 }
 function pausePlayback() {
   Tone.Transport.pause();      // 위치를 유지한 채 멈춘다(이어재생 가능)
