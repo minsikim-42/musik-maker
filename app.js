@@ -767,6 +767,29 @@ function enableDragScroll(scrollEl, flagEl, track) {
 // grid에 위임: pointerdown에서 셀을 기억 → pointerup 때 이동이 TAP_SLOP 이내면 그 셀을 토글.
 // 이 방식의 장점: (1) 홀드 시간 제한 없음(오래 눌러도 찍힘), (2) 살짝 움직여도(≤슬롭) 찍힘,
 // (3) 터치에서 실제 스크롤이 시작되면 브라우저가 pointercancel을 주므로 스크롤과 확실히 구분된다.
+// ══════════════════════════════════════════════════════════════
+//  편집 모드 — 켜야만 노트/트랙을 수정할 수 있다(실수 편집 방지). 시작은 잠금.
+//  재생·스크롤·공유·저장은 잠금 상태에서도 된다. 곡 내용엔 저장하지 않는 UI 상태.
+// ══════════════════════════════════════════════════════════════
+let editMode = false;
+const editBtn = document.getElementById("editMode");
+function setEditMode(on) {
+  editMode = !!on;
+  document.body.classList.toggle("locked", !editMode);
+  editBtn.classList.toggle("active", editMode);
+  editBtn.textContent = editMode ? "✏️ 편집 중" : "✏️ 편집";
+  editBtn.title = editMode ? "편집 모드 켜짐 — 눌러서 잠급니다" : "편집 모드 꺼짐 — 눌러서 수정 허용";
+  if (!editMode && moveMode) exitMoveMode(false); // 잠그면 진행 중인 이동 모드는 취소
+}
+editBtn.addEventListener("click", () => setEditMode(!editMode));
+let _lockHintAt = 0;
+function hintLocked() { // 잠금 상태에서 편집을 시도하면 안내(과도한 토스트 방지로 스로틀)
+  const now = Date.now();
+  if (now - _lockHintAt < 2000) return;
+  _lockHintAt = now;
+  showToast("✏️ 편집 모드를 켜야 수정할 수 있어요");
+}
+
 const TAP_SLOP = 12; // 이 픽셀 이내로 움직인 손뗌은 탭으로 본다(스크롤/드래그와 구분).
 const HOLD_MS = 600; // 기존 노트를 이만큼 '길게 눌러야' 드래그 이동(수정)이 켜진다(실수 이동 방지).
 function clearHold(tap) { // 길게누르기 타이머 해제 + '이동 준비' 표시 제거
@@ -777,6 +800,7 @@ function clearHold(tap) { // 길게누르기 타이머 해제 + '이동 준비' 
 function enableCellTap(grid, track) {
   let tap = null;
   grid.addEventListener("pointerdown", (e) => {
+    if (!editMode) { if (e.target.closest(".cell")) hintLocked(); return; } // 편집 모드 꺼짐 → 수정 불가(스크롤만)
     if (moveMode && mvTrack === track) { moveDown(e, grid, track); return; } // 이 트랙 이동 모드
     const cell = e.target.closest(".cell");
     tap = cell ? { id: e.pointerId, x: e.clientX, y: e.clientY, cell, moved: false, onCell: cell.classList.contains("on"), armed: false, holdTimer: null } : null;
@@ -2544,3 +2568,5 @@ if (importedId) {
 } else {
   openSession(activeSession() ? activeId : sessions[0].id); // 지난번 곡 이어서
 }
+
+setEditMode(false); // 시작은 편집 잠금(안전) — ✏️ 버튼으로 켠다

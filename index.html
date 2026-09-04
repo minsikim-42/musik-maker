@@ -7,7 +7,7 @@
   <!-- 소리 엔진: Tone.js (Web Audio API 위에서 악기·타이밍·재생을 다룸) -->
   <script src="https://unpkg.com/tone@14.8.49/build/Tone.js"></script>
   <!-- ?v= 는 배포마다 올린다: 브라우저·GitHub Pages 캐시로 옛 버전이 남는 것을 막는다 -->
-  <link rel="stylesheet" href="style.css?v=58" />
+  <link rel="stylesheet" href="style.css?v=59" />
 </head>
 <body>
   <!-- 왼쪽에서 밀려나오는 세션(내 곡) 목록 + 메뉴 -->
@@ -37,6 +37,7 @@
       </div>
       <!-- 항상 위에 고정되는 재생 조작 -->
       <div class="transport">
+        <button id="editMode" title="편집 모드 — 켜야 노트/트랙을 수정할 수 있습니다">✏️ 편집</button>
         <button id="playStart" class="primary" title="처음(맨 앞)부터 재생">⏮ 처음</button>
         <button id="playHere" title="타임라인 핸들 위치에서 재생">▶ 현재</button>
         <button id="stop">⏹ 정지</button>
@@ -109,6 +110,6 @@
     </div>
   </div>
 
-  <script src="app.js?v=58"></script>
+  <script src="app.js?v=59"></script>
 </body>
 </html>

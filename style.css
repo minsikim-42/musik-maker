@@ -48,7 +48,38 @@ body {
   align-items: center;
   gap: 8px;
   margin-left: auto;           /* 오른쪽으로 밀기 */
+  flex-wrap: nowrap;           /* 버튼을 한 줄로 두고 */
+  overflow-x: auto;            /* 넘치면 가로 스크롤 */
+  overflow-y: hidden;
+  max-width: 100%;
+  scrollbar-width: thin;       /* Firefox: 얇은 스크롤바 */
+  -webkit-overflow-scrolling: touch;
+  scroll-snap-type: x proximity;
+  padding-bottom: 2px;         /* 스크롤바가 버튼을 가리지 않게 */
 }
+.transport::-webkit-scrollbar { height: 6px; }
+.transport::-webkit-scrollbar-thumb { background: var(--line); border-radius: 3px; }
+.transport button { flex: 0 0 auto; white-space: nowrap; scroll-snap-align: start; }
+/* 편집 모드 버튼 — 켜지면 강조(재생바 잠금 표시) */
+#editMode.active {
+  background: var(--accent);
+  color: #0b1020;
+  border-color: var(--accent);
+  font-weight: 600;
+}
+
+/* ── 편집 모드 OFF(잠금): 곡을 바꾸는 컨트롤을 막는다. 재생·스크롤·공유·저장은 허용 ── */
+body.locked .controls label,
+body.locked #addTrack,
+body.locked .bar-ctl,
+body.locked .track-head select,
+body.locked .track-head button:not(.t-collapse),
+body.locked .track-head .t-vol input,
+body.locked #moveBar {
+  pointer-events: none;
+  opacity: .45;
+}
+body.locked .cell { touch-action: pan-x pan-y !important; } /* 잠금 땐 노트 위에서도 스크롤되게 */
 
 /* ── 재생 위치 타임라인 ──────────────────── */
 #timelineWrap {
