@@ -176,11 +176,12 @@ function makeKickBuffer(peak) {
 // out = 최종 출력 노드(마스터 리미터). → 재생용(buildSynth)과 WAV 오프라인 렌더가 공유한다.
 function createVoices(track, out) {
   out = out || realtimeMaster();
-  // 체인: 신스 → 트랙 볼륨 → 트랙 잔향(리버브) → 마스터.
-  // 리버브 wet=0이면 완전 드라이(꺼짐), 켜면 꼬리가 붙어 소리가 더 오래 울린다.
-  // 라이브 토글·해제 때 접근하려고 vol에 리버브 참조를 달아 둔다(반환 객체마다 안 달아도 되게).
-  const reverb = new Tone.Reverb({ decay: 3.6, preDelay: 0.02, wet: track.reverb ? REVERB_WET : 0 }).connect(out);
-  const vol = new Tone.Volume(track.volume ?? 0).connect(reverb);
+  // 체인: 신스 → 트랙 볼륨 → (잔향 켜졌을 때만 리버브) → 마스터.
+  // 리버브가 꺼져 있으면 컨볼버를 아예 안 만든다(끄면 무음이라 소리는 같지만 실시간 CPU를 크게 아낌).
+  // 켤 때 지연 생성(setTrackReverb)하고, vol._reverb에 참조를 달아 라이브 토글에 쓴다.
+  let reverb = null, dest = out;
+  if (track.reverb) { reverb = new Tone.Reverb({ decay: 3.6, preDelay: 0.02, wet: REVERB_WET }).connect(out); dest = reverb; }
+  const vol = new Tone.Volume(track.volume ?? 0).connect(dest);
   vol._reverb = reverb;
 
   if (track.type === "drums") {
@@ -233,8 +234,13 @@ function createVoices(track, out) {
     // 뒤에 이펙트 체인(디스토션·비트크러셔·코러스·비브라토·트레모로)을 단다.
     const poly = new Tone.PolySynth(Tone.MonoSynth, monoSynthOpts(snd));
     poly.volume.value = snd.volume;
-    const fx = buildFxChain(poly, snd, vol);
-    return { kind: "melody", poly, fx, vol };
+    // 이펙트가 하나라도 켜졌을 때만 체인을 붙인다(전부 0이면 상시 연산 노드를 안 만들어 CPU 절약).
+    if (anyFx(snd)) {
+      const fx = buildFxChain(poly, snd, vol);
+      return { kind: "melody", poly, fx, vol };
+    }
+    poly.connect(vol);
+    return { kind: "melody", poly, vol };
   }
 
   // 모든 악기는 PolySynth(Tone.Synth) 기반(화음 가능). PluckSynth/NoiseSynth는 Monophonic이 아니라
@@ -359,12 +365,18 @@ function applyFxValues(fx, s) {
   fx.chorus.wet.value = s.chorus ?? 0;
   fx.trem.depth.value = s.tremolo ?? 0;
 }
+// 이펙트가 하나라도 켜져 있나(전부 0이면 이펙트 체인 자체를 안 만들어 실시간 CPU를 아낀다)
+function anyFx(s) {
+  return (s.distortion || 0) > 0 || (s.bitcrush || 0) > 0 || (s.chorus || 0) > 0 || (s.vibrato || 0) > 0 || (s.tremolo || 0) > 0;
+}
 // 소리를 편집할 때: 그 소리를 쓰는 트랙 신스에 즉시 반영(재생성 없이)
 function applyParamsLive(track) {
   const s = track.synth;
   if (!s || s.kind !== "melody" || !s.poly.set) return;
   const p = trackSound(track);
   if (!p || p.kind === "sample") return;
+  // 이펙트 유무가 바뀌면(0↔양수) 체인을 새로 붙여야 하므로 신스만 재생성(드물게 슬라이더가 0을 넘길 때)
+  if (anyFx(p) !== !!s.fx) { track.synth = buildSynth(track); return; }
   s.poly.set(monoSynthOpts(p));
   s.poly.volume.value = p.volume;
   if (s.fx) applyFxValues(s.fx, p);
@@ -393,11 +405,19 @@ function setTrackVolume(track, db) {
   if (track.synth && track.synth.vol) track.synth.vol.volume.value = db;
 }
 
-// 트랙 잔향(리버브) 켜고 끄기를 라이브로(재생성 없이). wet만 바꾼다.
+// 트랙 잔향(리버브) 켜고 끄기. 리버브 컨볼버는 '꺼져 있으면 아예 안 만든다'(실시간 CPU 절약).
+// 처음 켤 때만 노드를 만들어 vol 뒤에 끼우고(지연 생성), 이후 토글은 wet만 라이브로 바꾼다.
 function setTrackReverb(track, on) {
   track.reverb = !!on;
-  const rv = track.synth && track.synth.vol && track.synth.vol._reverb;
-  if (rv) rv.wet.value = on ? REVERB_WET : 0;
+  const s = track.synth;
+  if (!s || !s.vol) return;
+  if (s.vol._reverb) { s.vol._reverb.wet.value = on ? REVERB_WET : 0; return; } // 이미 노드 있으면 라이브
+  if (on) { // 노드가 없는데 켜야 함 → 리버브 만들어 vol → 리버브 → 마스터로 재연결
+    const reverb = new Tone.Reverb({ decay: 3.6, preDelay: 0.02, wet: REVERB_WET }).connect(realtimeMaster());
+    s.vol.disconnect();
+    s.vol.connect(reverb);
+    s.vol._reverb = reverb;
+  }
 }
 
 // 한 격자(grid 또는 half)의 col 열에 켜진 노트를 time에 울린다.
