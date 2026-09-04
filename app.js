@@ -296,6 +296,28 @@ function defaultParams() {
     vibrato: 0, tremolo: 0,
   };
 }
+// ── 오케스트라 대표 악기 근사 프리셋 ──────────────────────────
+// 빼기식 신스(MonoSynth) 파라미터로 각 악기의 '느낌'을 흉내낸다(진짜 샘플이 아니라 근사).
+// 참고: 공유 링크(코덱 v5)엔 파형·ADSR·컷오프·볼륨만 실린다 → 링크로 열면 고급 필드
+// (필터 엔벨로프·비브라토·코러스·디튠 등)는 빠지고 기본 신스로 들린다. 세션 저장엔 전부 담긴다.
+const INSTRUMENT_PRESETS = [
+  { emoji: "🎹", name: "피아노",       p: { wave: "triangle", attack: 0.004, decay: 1.4,  sustain: 0.0,  release: 0.9,  cutoff: 4200, resonance: 0.6, filterEnvAmount: 1.2, filterDecay: 1.1, volume: -7 } },
+  { emoji: "🎸", name: "베이스",       p: { wave: "sawtooth", attack: 0.02,  decay: 0.25, sustain: 0.55, release: 0.25, cutoff: 700,  resonance: 1.2, filterEnvAmount: 0.5, filterDecay: 0.2, volume: -5 } },
+  { emoji: "🎻", name: "바이올린",     p: { wave: "sawtooth", attack: 0.16,  decay: 0.2,  sustain: 0.9,  release: 0.4,  cutoff: 3200, resonance: 0.8, vibrato: 0.35, chorus: 0.25, detune: 8, volume: -10 } },
+  { emoji: "🎻", name: "첼로",         p: { wave: "sawtooth", attack: 0.12,  decay: 0.2,  sustain: 0.85, release: 0.5,  cutoff: 1600, resonance: 0.9, vibrato: 0.25, detune: 6, volume: -8 } },
+  { emoji: "🎵", name: "플루트",       p: { wave: "sine",     attack: 0.09,  decay: 0.1,  sustain: 0.92, release: 0.3,  cutoff: 5000, resonance: 0.4, vibrato: 0.18, volume: -7 } },
+  { emoji: "🎺", name: "금관(트럼펫)", p: { wave: "sawtooth", attack: 0.05,  decay: 0.18, sustain: 0.85, release: 0.22, cutoff: 2600, resonance: 1.4, filterEnvAmount: 1.6, filterDecay: 0.14, volume: -9 } },
+  { emoji: "🎹", name: "오르간",       p: { wave: "square",   attack: 0.01,  decay: 0.05, sustain: 1.0,  release: 0.08, cutoff: 3500, resonance: 0.5, chorus: 0.15, volume: -12 } },
+  { emoji: "🥁", name: "팀파니",       p: { wave: "sine",     attack: 0.003, decay: 0.7,  sustain: 0.0,  release: 0.5,  cutoff: 900,  resonance: 1.5, filterEnvAmount: 0.8, filterDecay: 0.3, distortion: 0.08, volume: -3 } },
+];
+// 프리셋으로 새 소리 하나 만들고 편집기를 연다(만든 뒤 슬라이더로 더 다듬을 수 있게).
+function addPresetSound(preset) {
+  const s = { id: genSoundId(), name: preset.name, ...defaultParams(), ...preset.p };
+  soundLib.push(s);
+  markDirty(); render();
+  openSoundEditor(s);
+}
+
 const FILTER_TYPES = [["lowpass", "로우패스 (두껍게)"], ["highpass", "하이패스 (얇게)"], ["bandpass", "밴드패스 (가운데)"]];
 // 커스텀 소리 → Tone.MonoSynth 옵션. detune>0면 fat 오실레이터(유니즌)로 두껍게.
 function synthOscOpts(s) {
@@ -1945,6 +1967,22 @@ function openSoundManager() {
   upRow.appendChild(upBtn);
   upRow.appendChild(fileInput);
   modalBody.appendChild(upRow);
+
+  // 악기 프리셋 — 뭘 만들지 막막할 때: 누르면 그 악기 근사 소리를 만들어 편집기로 연다.
+  const presetTitle = document.createElement("p");
+  presetTitle.style.cssText = "margin:16px 0 6px;color:var(--muted);font-size:13px;";
+  presetTitle.textContent = "악기로 시작하기 — 누르면 비슷한 소리를 만들어 드려요 (만든 뒤 다듬을 수 있어요)";
+  modalBody.appendChild(presetTitle);
+  const presetGrid = document.createElement("div");
+  presetGrid.className = "preset-grid";
+  for (const preset of INSTRUMENT_PRESETS) {
+    const b = document.createElement("button");
+    b.className = "preset-btn";
+    b.innerHTML = `<span class="preset-emoji">${preset.emoji}</span><span>${escapeHtml(preset.name)}</span>`;
+    b.addEventListener("click", () => addPresetSound(preset));
+    presetGrid.appendChild(b);
+  }
+  modalBody.appendChild(presetGrid);
 
   const list = document.createElement("div");
   list.className = "session-list";
