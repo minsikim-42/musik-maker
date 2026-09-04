@@ -787,7 +787,7 @@ function hintLocked() { // 잠금 상태에서 편집을 시도하면 안내(과
   const now = Date.now();
   if (now - _lockHintAt < 2000) return;
   _lockHintAt = now;
-  showToast("✏️ 편집 모드를 켜야 수정할 수 있어요");
+  showToast("편집모드 비활성화");
 }
 
 const TAP_SLOP = 12; // 이 픽셀 이내로 움직인 손뗌은 탭으로 본다(스크롤/드래그와 구분).
@@ -800,12 +800,12 @@ function clearHold(tap) { // 길게누르기 타이머 해제 + '이동 준비' 
 function enableCellTap(grid, track) {
   let tap = null;
   grid.addEventListener("pointerdown", (e) => {
-    if (!editMode) { if (e.target.closest(".cell")) hintLocked(); return; } // 편집 모드 꺼짐 → 수정 불가(스크롤만)
     if (moveMode && mvTrack === track) { moveDown(e, grid, track); return; } // 이 트랙 이동 모드
     const cell = e.target.closest(".cell");
+    // 잠금 상태에서도 탭을 추적한다(스크롤과 구분) — 실제로 찍으려 한 탭에서만 pointerup에서 안내한다.
     tap = cell ? { id: e.pointerId, x: e.clientX, y: e.clientY, cell, moved: false, onCell: cell.classList.contains("on"), armed: false, holdTimer: null } : null;
-    // 켜진 노트를 누르면 HOLD_MS 뒤 '이동 준비'(armed) — 그때부터 드래그하면 옮겨진다.
-    if (tap && tap.onCell && !moveMode) {
+    // 켜진 노트를 누르면 HOLD_MS 뒤 '이동 준비'(armed) — 그때부터 드래그하면 옮겨진다. (편집 모드에서만)
+    if (editMode && tap && tap.onCell && !moveMode) {
       tap.holdTimer = setTimeout(() => { if (tap) { tap.armed = true; tap.cell.classList.add("note-armed"); } }, HOLD_MS);
     }
   });
@@ -829,6 +829,8 @@ function enableCellTap(grid, track) {
     if (t.moved || grid._dragged) return; // 드래그(스크롤)면 음 안 찍음
     const cell = t.cell, r = cell._r, c = cell._c;
     if (r == null || c == null) return;
+    // 진짜 탭(움직임 없는 손뗌)인데 편집이 잠겨 있으면 → 여기서만 안내(스크롤/터치엔 안 뜸).
+    if (!editMode) { hintLocked(); return; }
     track.grid[r][c] = !track.grid[r][c];
     cell.classList.toggle("on", track.grid[r][c]);
     showEditMarker(c); // 찍은 칸이 플레이바 어디인지 별도 표식(재생 핸들은 안 옮김)
