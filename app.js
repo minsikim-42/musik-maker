@@ -1764,13 +1764,6 @@ async function playFrom(fromStep, opts = {}) {
   updateTransportButtons();
 }
 btnPlayHere.addEventListener("click", () => playFrom(playheadStep, { resume: true })); // 현재/이어서(재생 중이면 일시정지)
-document.getElementById("stop").addEventListener("click", () => {
-  Tone.Transport.stop();
-  if (seq) seq.stop();
-  playing = false; paused = false;
-  updateTimeline(); // 멈춘 위치에 핸들·노란 열 유지(현재 시점 재생이 이어받음)
-  updateTransportButtons();
-});
 bpm.addEventListener("input", () => setBpm(bpm.value));
 // 숫자 입력: 타이핑 중엔 필드를 건드리지 않고(범위 내면 반영), 확정(blur/Enter) 때 클램프
 bpmNum.addEventListener("input", () => {
