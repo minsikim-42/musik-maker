@@ -115,6 +115,7 @@ function detectSampleFreq(toneBuf) {
 const MASTER_TRIM = 0.5;  // -6dB 헤드룸
 const MASTER_DRIVE = 6;   // 소프트 클립이 다루는 입력 범위(±6까지 매끄럽게)
 const REVERB_WET = 0.55;  // 트랙 잔향 켰을 때 젖음 비율(0=드라이, 1=완전 잔향)
+const MAX_POLY = 16;      // 트랙당 동시 발음수 상한(기본 32 → 절반). 트리거 순간 CPU 스파이크·상시 오실레이터 억제
 function softShape(s) {    // 0.9 이하는 그대로, 그 위는 tanh로 완만히 굽혀 ~1.0에서 멈춘다
   const t = 0.9, a = Math.abs(s), sg = Math.sign(s);
   return a <= t ? s : sg * (t + (1 - t) * Math.tanh((a - t) / (1 - t)));
@@ -233,6 +234,7 @@ function createVoices(track, out) {
     // 신스 소리: 사용자가 만든 음색. MonoSynth로 필터(공명)+필터엔벨로프를 내장으로 얻고,
     // 뒤에 이펙트 체인(디스토션·비트크러셔·코러스·비브라토·트레모로)을 단다.
     const poly = new Tone.PolySynth(Tone.MonoSynth, monoSynthOpts(snd));
+    poly.maxPolyphony = MAX_POLY; // 동시 발음수 제한 → 트리거 순간 CPU 스파이크·상시 오실레이터 수 억제
     poly.volume.value = snd.volume;
     // 이펙트가 하나라도 켜졌을 때만 체인을 붙인다(전부 0이면 상시 연산 노드를 안 만들어 CPU 절약).
     if (anyFx(snd)) {
@@ -282,6 +284,7 @@ function createVoices(track, out) {
       envelope: { attack: 0.005, decay: 0.2, sustain: 0.2, release: 0.6 },
     });
   }
+  poly.maxPolyphony = MAX_POLY; // 동시 발음수 제한(트리거 순간 부하 억제)
   poly.connect(vol);
   poly.volume.value = track.instrument === "wind" ? -4 : -6; // 사인은 살짝 작게 들려 보정
   return { kind: "melody", poly, vol };
