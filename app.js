@@ -1822,6 +1822,19 @@ function b64urlToBytes(str) {
   for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
   return out;
 }
+// gzip 압축/해제(브라우저 내장 CompressionStream). 긴 곡의 공유 링크를 줄이는 데 쓴다.
+// 격자는 대부분 0이라 압축이 아주 잘 된다. 지원 안 하는 브라우저면 무압축(#song=)으로 폴백.
+const gzipSupported = () => typeof CompressionStream !== "undefined" && typeof DecompressionStream !== "undefined";
+async function gzipBytes(u8) {
+  const cs = new CompressionStream("gzip");
+  const w = cs.writable.getWriter(); w.write(u8); w.close();
+  return new Uint8Array(await new Response(cs.readable).arrayBuffer());
+}
+async function gunzipBytes(u8) {
+  const ds = new DecompressionStream("gzip");
+  const w = ds.writable.getWriter(); w.write(u8); w.close();
+  return new Uint8Array(await new Response(ds.readable).arrayBuffer());
+}
 
 function pushName(bytes, s) {
   const nB = Array.from(new TextEncoder().encode(s || "")).slice(0, 255);
@@ -1851,7 +1864,8 @@ function packGrid(bytes, grid) {
 }
 
 // 버전 6: 반칸(32분음표) 격자 추가. (v1~v5 링크도 decodeShare가 계속 연다)
-function encodeShare(name, data) {
+// 원시 바이트(base64 전)를 돌려준다 — 공유 URL 만들 때 필요하면 gzip으로 압축한다.
+function encodeShareBytes(name, data) {
   const bytes = [];
   bytes.push(6);
   pushName(bytes, name);
@@ -1880,11 +1894,11 @@ function encodeShare(name, data) {
     const emptyHalf = t.grid.map((row) => row.map(() => false));
     packGrid(bytes, t.half && t.half.length ? t.half : emptyHalf); // v6: 반칸(32분음표) 격자
   }
-  return bytesToB64url(Uint8Array.from(bytes));
+  return Uint8Array.from(bytes);
 }
 
-function decodeShare(code) {
-  const b = b64urlToBytes(code);
+function decodeShare(code) { return decodeShareBytes(b64urlToBytes(code)); }
+function decodeShareBytes(b) {
   let i = 0;
   const readName = () => { const l = b[i++]; const s = new TextDecoder().decode(b.slice(i, i + l)); i += l; return s; };
   const readParams = () => ({
@@ -1966,14 +1980,23 @@ const modal = document.getElementById("modal");
 const modalTitle = document.getElementById("modalTitle");
 const modalBody = document.getElementById("modalBody");
 
-function openShareModal() {
+async function openShareModal() {
   const s = activeSession();
   if (!s) return;
   // 공유는 '저장 여부와 무관하게' 지금 화면의 편집 상태를 담는다(serialize).
-  let code, url, err = null;
+  let url, err = null;
   try {
-    code = encodeShare(s.name, serialize());
-    url = location.origin + location.pathname + "#song=" + code;
+    const raw = encodeShareBytes(s.name, serialize());
+    const base = location.origin + location.pathname;
+    const rawB64 = bytesToB64url(raw);
+    // 짧은 곡은 기존 무압축(#song=, 어느 브라우저나 열림). 길면 gzip 압축(#songz=)해 링크를 확 줄인다.
+    url = base + "#song=" + rawB64;
+    if (rawB64.length > 1200 && gzipSupported()) {
+      try {
+        const gzB64 = bytesToB64url(await gzipBytes(raw));
+        if (gzB64.length < rawB64.length) url = base + "#songz=" + gzB64;
+      } catch (e) { /* 압축 실패 → 무압축 유지 */ }
+    }
   } catch (e) { err = e; }
 
   modalTitle.textContent = "「" + s.name + "」 공유";
@@ -2016,7 +2039,7 @@ function openShareModal() {
     if (/^(localhost|127\.|0\.0\.0\.0)/.test(location.hostname) || location.protocol === "file:") {
       const note = document.createElement("p");
       note.className = "share-note";
-      note.textContent = "⚠ 지금은 이 컴퓨터에서만 열리는 주소(localhost)입니다. 다른 기기에서 열려면 앱을 공개 주소(예: GitHub Pages)에 올려야 합니다. 링크의 #song= 뒤 코드는 그대로 옮겨서 씁니다.";
+      note.textContent = "⚠ 지금은 이 컴퓨터에서만 열리는 주소(localhost)입니다. 다른 기기에서 열려면 앱을 공개 주소(예: GitHub Pages)에 올려야 합니다. 링크 전체를 그대로 옮겨서 씁니다.";
       modalBody.appendChild(note);
     }
   }
@@ -2702,12 +2725,16 @@ function scoreToPng(svgEl) {
   img.src = src;
 }
 
-// 링크(#song=...)로 들어왔으면 새 곡으로 가져온다
-function importFromHash() {
-  const m = (location.hash || "").match(/^#song=(.+)$/);
+// 링크(#song=... 무압축 / #songz=... gzip 압축)로 들어왔으면 새 곡으로 가져온다
+async function importFromHash() {
+  const hash = location.hash || "";
+  const mz = hash.match(/^#songz=(.+)$/);
+  const m = mz || hash.match(/^#song=(.+)$/);
   if (!m) return null;
   try {
-    const d = decodeShare(m[1]);
+    let bytes = b64urlToBytes(m[1]);
+    if (mz) bytes = await gunzipBytes(bytes); // 압축 링크는 먼저 푼다
+    const d = decodeShareBytes(bytes);
     const s = { id: genId(), name: d.name || "공유받은 곡", updatedAt: Date.now(),
       data: { bpm: d.bpm, bars: d.bars, sounds: d.sounds || [], tracks: d.tracks } };
     sessions.unshift(s);
@@ -2724,15 +2751,17 @@ function importFromHash() {
 //  시작
 // ══════════════════════════════════════════════════════════════
 loadSessionsFromStorage();
-const importedId = importFromHash();
-if (importedId) {
-  openSession(importedId);          // 공유 링크로 들어옴 → 그 곡을 연다
-  setTimeout(() => showToast("공유받은 곡을 내 곡 목록에 담았습니다"), 300);
-} else if (sessions.length === 0) {
-  newSong(true);                    // 처음 방문: 빈 곡 하나 만들고 연다
-} else {
-  openSession(activeSession() ? activeId : sessions[0].id); // 지난번 곡 이어서
-}
-
-setEditMode(false); // 시작은 편집 잠금(안전) — ✏️ 버튼으로 켠다
-updateZoomUI();     // 줌 버튼 활성/비활성·라벨 초기화
+// 압축 링크(#songz=) 해제가 비동기라 시작 흐름을 async로 감싼다.
+(async () => {
+  const importedId = await importFromHash();
+  if (importedId) {
+    openSession(importedId);          // 공유 링크로 들어옴 → 그 곡을 연다
+    setTimeout(() => showToast("공유받은 곡을 내 곡 목록에 담았습니다"), 300);
+  } else if (sessions.length === 0) {
+    newSong(true);                    // 처음 방문: 빈 곡 하나 만들고 연다
+  } else {
+    openSession(activeSession() ? activeId : sessions[0].id); // 지난번 곡 이어서
+  }
+  setEditMode(false); // 시작은 편집 잠금(안전) — ✏️ 버튼으로 켠다
+  updateZoomUI();     // 줌 버튼 활성/비활성·라벨 초기화
+})();
