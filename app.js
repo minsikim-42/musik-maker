@@ -709,7 +709,8 @@ function renderTrack(track) {
 
   const grid = document.createElement("div");
   grid.className = "grid in-scroller" + (splitOn() ? " zoomed" : ""); // 스크롤은 바깥 hscroll/vscroll이 맡는다
-  grid.style.gridTemplateColumns = `auto repeat(${steps}, ${zoomW}px)`; // 줌: 칸 너비 고정 → 넘치면 가로 스크롤
+  grid.style.gridTemplateColumns = `auto repeat(${steps}, ${zoomW}px)`; // 가로 줌: 칸 너비 고정 → 넘치면 가로 스크롤
+  grid.style.setProperty("--cell-h", zoomH + "px"); // 세로 줌: 칸 높이
 
   rows.forEach((rowName, r) => {
     const label = document.createElement("div");
@@ -765,7 +766,7 @@ function renderTrack(track) {
   if (track.type === "melody") enableDragScroll(box, grid, track); // 마우스 세로 드래그(grid._dragged로 클릭 취소)
   enableCellTap(grid, track); // 관대한 탭으로 음 찍기(살짝 움직이거나 오래 눌러도 인식)
 
-  const rowH = 26; // 셀 24 + 간격 2
+  const rowH = zoomH + 2; // 셀 높이 + 간격 2 (세로 줌 반영)
   const defTop = track.type === "melody" ? Math.max(0, MELODY_NOTES.indexOf(DEFAULT_TOP_NOTE) * rowH) : 0;
   requestAnimationFrame(() => {
     box.scrollTop = track._scrollTop != null ? track._scrollTop : defTop;
@@ -863,6 +864,31 @@ function updateZoomUI() {
 }
 if (zoomOutBtn) zoomOutBtn.addEventListener("click", () => zoomStep(-1));
 if (zoomInBtn) zoomInBtn.addEventListener("click", () => zoomStep(1));
+
+// ── 세로 줌 — 칸(노트) 높이를 조절(음역을 더 크게 보거나, 더 많은 음을 한눈에). 뷰 상태.
+const ZOOM_HEIGHTS = [16, 20, 24, 30, 38, 48]; // 칸 높이 단계(px)
+let zoomHIdx = 2;      // 기본 24px
+let zoomH = ZOOM_HEIGHTS[zoomHIdx];
+function applyZoomV() {
+  zoomH = ZOOM_HEIGHTS[zoomHIdx];
+  render();
+  updateZoomVUI();
+  markDirty();
+}
+function zoomStepV(dir) {
+  const ni = Math.max(0, Math.min(ZOOM_HEIGHTS.length - 1, zoomHIdx + dir));
+  if (ni === zoomHIdx) return;
+  zoomHIdx = ni;
+  applyZoomV();
+}
+const zoomVOutBtn = document.getElementById("zoomVOut");
+const zoomVInBtn = document.getElementById("zoomVIn");
+function updateZoomVUI() {
+  if (zoomVOutBtn) zoomVOutBtn.disabled = zoomHIdx <= 0;
+  if (zoomVInBtn) zoomVInBtn.disabled = zoomHIdx >= ZOOM_HEIGHTS.length - 1;
+}
+if (zoomVOutBtn) zoomVOutBtn.addEventListener("click", () => zoomStepV(-1));
+if (zoomVInBtn) zoomVInBtn.addEventListener("click", () => zoomStepV(1));
 
 const TAP_SLOP = 12; // 이 픽셀 이내로 움직인 손뗌은 탭으로 본다(스크롤/드래그와 구분).
 const HOLD_MS = 600; // 기존 노트를 이만큼 '길게 눌러야' 드래그 이동(수정)이 켜진다(실수 이동 방지).
@@ -1372,6 +1398,7 @@ function serialize() {
     beatUnit,
     barBeats,
     zoom: zoomIdx,   // 가로 줌 단계(뷰 상태) — 공유 링크엔 안 담김
+    zoomV: zoomHIdx, // 세로 줌 단계(뷰 상태)
     sounds: soundLib.map((s) => ({ ...s })), // 커스텀 소리 라이브러리
     tracks: tracks.map((t) => ({
       type: t.type,
@@ -1401,9 +1428,11 @@ function deserialize(data) {
   bars = data.bars || 2;
   beatUnit = data.beatUnit || 4;
   barBeats = data.barBeats || 4;
-  zoomIdx = Math.max(0, Math.min(ZOOM_WIDTHS.length - 1, data.zoom ?? 2)); // 줌 복원(뷰)
+  zoomIdx = Math.max(0, Math.min(ZOOM_WIDTHS.length - 1, data.zoom ?? 2)); // 가로 줌 복원(뷰)
   zoomW = ZOOM_WIDTHS[zoomIdx];
-  updateZoomUI();
+  zoomHIdx = Math.max(0, Math.min(ZOOM_HEIGHTS.length - 1, data.zoomV ?? 2)); // 세로 줌 복원(뷰)
+  zoomH = ZOOM_HEIGHTS[zoomHIdx];
+  updateZoomUI(); updateZoomVUI();
   steps = bars * barCells();
   if (beatInput) beatInput.value = beatUnit;
   if (barInput) barInput.value = barBeats;
@@ -2822,5 +2851,5 @@ loadSessionsFromStorage();
     openSession(activeSession() ? activeId : sessions[0].id); // 지난번 곡 이어서
   }
   setEditMode(false); // 시작은 편집 잠금(안전) — ✏️ 버튼으로 켠다
-  updateZoomUI();     // 줌 버튼 활성/비활성·라벨 초기화
+  updateZoomUI(); updateZoomVUI(); // 줌 버튼 활성/비활성·라벨 초기화
 })();
