@@ -1270,6 +1270,7 @@ function highlightColumn(col) {
 
 // ── 재생 위치(플레이헤드) + 타임라인 ────────────────────────────
 let playheadStep = 0;   // '현재 시점' — 여기서 재생 시작. 재생 중엔 진행 위치를 따라 움직인다.
+let playStartStep = 0;  // 이번 재생이 시작된 자리. 정지하면 여기로 되돌려 다시 재생하면 같은 곳부터.
 let playing = false;
 let paused = false;   // 일시정지 상태(Transport.pause, 위치 유지). '현재' 버튼으로 이어재생.
 let pausedStep = -1;  // 일시정지한 스텝. 이어서 할 때 핸들이 이 자리 그대로면 끊김 없이, 옮겼으면 그 자리에서 새로.
@@ -1731,12 +1732,12 @@ const btnPlayHere = document.getElementById("playHere");
 function updateTransportButtons() {
   btnPlayHere.textContent = playing ? "⏹ 정지" : "▶ 재생";
 }
-// 정지: 재생을 멈추고 핸들은 멈춘 자리에 둔다(다시 재생하면 그 자리부터).
+// 정지: 재생을 멈추고 핸들을 '재생 시작 위치'로 되돌린다 → 다시 재생하면 같은 곳부터(반복 재생 명확).
 function stopPlayback() {
   Tone.Transport.stop();
   if (seq) seq.stop();
   playing = false; paused = false;
-  updateTimeline();
+  setPlayhead(playStartStep); // 진행하며 움직인 핸들을 시작 자리로 복귀
   updateTransportButtons();
 }
 async function playFrom(fromStep) {
@@ -1747,6 +1748,7 @@ async function playFrom(fromStep) {
   if (seq) seq.stop();
   rebuildSequence();
   const N = Math.max(0, Math.min(steps - 1, Math.round(fromStep)));
+  playStartStep = N;                  // 정지 때 이 자리로 돌아온다
   setPlayhead(N);
   playing = true;
   seq.start("+0.06");                 // 첫 이벤트를 살짝 뒤로 → 시작 순간 '과거 시각' 스케줄 경고 방지
