@@ -989,7 +989,8 @@ let moveMode = false;
 let mvTrack = null; // 이동 모드가 적용되는 '한 트랙'(이 트랙 안에서만 선택/이동)
 let moveSel = null;   // { track, notes:[[dr,dc]], h, w, r, c, base }
 let moveDrag = null;  // { mode:'select'|'move', grid, id, lastX, lastY, ... }
-let moveSnapshot = null; // mvTrack.grid 복사 — 취소 복원용
+let moveSnapshot = null;     // mvTrack.grid 복사 — 취소 복원용
+let moveSnapshotHalf = null; // mvTrack.half 복사 — 취소 복원용(반박자)
 const clampi = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 const trackRowCount = (t) => (t.type === "drums" ? DRUM_ROWS : MELODY_NOTES).length;
 
@@ -1009,17 +1010,27 @@ function refreshTrackCells(t) {
   if (!t.cellEls) return;
   for (let r = 0; r < t.cellEls.length; r++) for (let c = 0; c < steps; c++) {
     const el = t.cellEls[r] && t.cellEls[r][c];
-    if (el) el.classList.toggle("on", !!t.grid[r][c]);
+    if (!el) continue;
+    el.classList.toggle("on", !!t.grid[r][c]);
+    el.classList.toggle("half-on", !!(t.half && t.half[r][c])); // 반박자도 함께 갱신
   }
 }
 // 들어올린 블록을 base 위에 현재 (r,c)로 다시 찍는다(격자 데이터 갱신 → 재생 반영).
 function stampBlock() {
   if (!moveSel) return;
   const t = moveSel.track, g = t.grid, base = moveSel.base;
-  for (let r = 0; r < g.length; r++) for (let c = 0; c < g[r].length; c++) g[r][c] = base[r][c];
+  const hg = t.half, hbase = moveSel.halfBase;
+  for (let r = 0; r < g.length; r++) for (let c = 0; c < g[r].length; c++) {
+    g[r][c] = base[r][c];
+    if (hg && hbase) hg[r][c] = hbase[r][c];
+  }
   for (const [dr, dc] of moveSel.notes) {
     const rr = moveSel.r + dr, cc = moveSel.c + dc;
     if (rr >= 0 && rr < g.length && cc >= 0 && cc < steps) g[rr][cc] = true; // 겹치면 덮어씀(합쳐짐)
+  }
+  if (hg && moveSel.halfNotes) for (const [dr, dc] of moveSel.halfNotes) {
+    const rr = moveSel.r + dr, cc = moveSel.c + dc;
+    if (rr >= 0 && rr < hg.length && cc >= 0 && cc < steps) hg[rr][cc] = true; // 반박자도 같이 옮김
   }
   refreshTrackCells(t);
   paintSelRect(t, moveSel.r, moveSel.c, moveSel.r + moveSel.h - 1, moveSel.c + moveSel.w - 1);
@@ -1027,12 +1038,14 @@ function stampBlock() {
 function finalizeSelection(d) {
   const r0 = Math.min(d.r0, d.r1), r1 = Math.max(d.r0, d.r1);
   const c0 = Math.min(d.c0, d.c1), c1 = Math.max(d.c0, d.c1);
-  const t = mvTrack, notes = [];
+  const t = mvTrack, notes = [], halfNotes = [];
   const base = t.grid.map((row) => row.slice());
+  const halfBase = t.half ? t.half.map((row) => row.slice()) : null;
   for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) {
     if (t.grid[r][c]) { notes.push([r - r0, c - c0]); base[r][c] = false; }
+    if (t.half && t.half[r][c]) { halfNotes.push([r - r0, c - c0]); halfBase[r][c] = false; } // 반박자도 선택에 포함
   }
-  moveSel = { track: t, notes, h: r1 - r0 + 1, w: c1 - c0 + 1, r: r0, c: c0, base };
+  moveSel = { track: t, notes, halfNotes, h: r1 - r0 + 1, w: c1 - c0 + 1, r: r0, c: c0, base, halfBase };
   stampBlock();
 }
 function cellAt(x, y, track) {
@@ -1154,14 +1167,18 @@ function enterMoveMode(track) {
   if (moveMode) return;
   moveMode = true; mvTrack = track; moveSel = null; moveDrag = null;
   moveSnapshot = track.grid.map((row) => row.slice()); // 이 트랙만 스냅샷(취소 복원)
+  moveSnapshotHalf = track.half ? track.half.map((row) => row.slice()) : null;
   if (moveBar) moveBar.hidden = false;
   render(); // 활성 트랙 버튼·스타일 반영(다른 트랙 이동 버튼 잠금 포함)
 }
 function exitMoveMode(commit) {
   if (!moveMode) return;
   const t = mvTrack;
-  if (!commit && moveSnapshot && t) t.grid = moveSnapshot.map((row) => row.slice()); // 취소: 복원
-  moveMode = false; mvTrack = null; moveSel = null; moveDrag = null; moveSnapshot = null;
+  if (!commit && moveSnapshot && t) { // 취소: 복원(반박자 포함)
+    t.grid = moveSnapshot.map((row) => row.slice());
+    if (moveSnapshotHalf) t.half = moveSnapshotHalf.map((row) => row.slice());
+  }
+  moveMode = false; mvTrack = null; moveSel = null; moveDrag = null; moveSnapshot = null; moveSnapshotHalf = null;
   stopEdgeScroll();
   if (moveBar) moveBar.hidden = true;
   render(); // 격자 다시 그려 선택 표시·버튼 상태 정리
