@@ -2,6 +2,17 @@
 // 세션 = 곡 하나(트랙·악기·격자·템포·마디). 브라우저 localStorage에 저장된다.
 // 목록에서 곡을 누르면 그 곡이 열린다. 저장은 '저장' 버튼을 누를 때만 한다(자동 저장 없음).
 
+// ── 실시간 재생 '지직거림'(버퍼 언더런) 방지 ─────────────────────────────
+// WAV(오프라인 렌더)는 실시간 마감이 없어 깨끗하지만, 실시간 재생은 CPU가 밀리면 오디오 버퍼가
+// 비어 지직거린다. 출력 버퍼를 넉넉히('playback' 지연 힌트) + 스케줄 여유(lookAhead)를 키운다.
+// 재생 시작이 아주 살짝 늦어질 뿐(화면 플레이헤드도 같이 늦어 동기 유지) 음질이 안정된다.
+// ※ 반드시 어떤 Tone 노드보다 먼저 실행돼야 새 컨텍스트에 노드가 만들어진다(곡 로드 시 신스 생성됨).
+try {
+  Tone.setContext(new Tone.Context({ latencyHint: "playback", lookAhead: 0.2 }));
+} catch (e) {
+  try { Tone.getContext().lookAhead = 0.2; } catch (e2) {}
+}
+
 // ── 음/드럼 줄 정의 ─────────────────────────────────────────────
 // 멜로디 음역: C6(맨 위) ~ C3(맨 아래). 격자는 이 중 일부만 보여주고 세로 스크롤한다.
 function buildMelodyNotes(lowOct, highOct) {
@@ -781,7 +792,7 @@ function enableDragScroll(scrollEl, flagEl, track) {
   let st = null;
   scrollEl.addEventListener("pointerdown", (e) => {
     if (moveMode && mvTrack === track) return;             // 이동 중인 트랙만 드래그=선택/이동(다른 트랙은 정상 스크롤)
-    if (e.target.closest && e.target.closest(".cell.on")) return; // 기존 노트 위에서 시작 → 노트 끌기(스크롤 안 함)
+    if (e.target.closest && e.target.closest(".cell.on, .cell.half-on")) return; // 기존 노트(한 칸/반칸) 위에서 시작 → 노트 끌기(스크롤 안 함)
     if (e.pointerType !== "mouse" || e.button !== 0) return; // 터치/펜은 기본 스크롤
     st = { y: e.clientY, top: scrollEl.scrollTop, moved: false };
     flagEl._dragged = false;
@@ -876,9 +887,9 @@ function enableCellTap(grid, track) {
     if (moveMode && mvTrack === track) { moveDown(e, grid, track); return; } // 이 트랙 이동 모드
     const cell = e.target.closest(".cell");
     // 잠금 상태에서도 탭을 추적한다(스크롤과 구분) — 실제로 찍으려 한 탭에서만 pointerup에서 안내한다.
-    tap = cell ? { id: e.pointerId, x: e.clientX, y: e.clientY, cell, moved: false, onCell: cell.classList.contains("on"), armed: false, holdTimer: null } : null;
-    // 켜진 노트를 누르면 HOLD_MS 뒤 '이동 준비'(armed) — 그때부터 드래그하면 옮겨진다. (편집 모드에서만)
-    if (editMode && tap && tap.onCell && !moveMode) {
+    tap = cell ? { id: e.pointerId, x: e.clientX, y: e.clientY, cell, moved: false, onCell: cell.classList.contains("on"), halfCell: cell.classList.contains("half-on"), armed: false, holdTimer: null } : null;
+    // 켜진 노트(한 칸 또는 반칸)를 누르면 HOLD_MS 뒤 '이동 준비'(armed) — 그때부터 드래그하면 옮겨진다. (편집 모드에서만)
+    if (editMode && tap && (tap.onCell || tap.halfCell) && !moveMode) {
       tap.holdTimer = setTimeout(() => { if (tap) { tap.armed = true; tap.cell.classList.add("note-armed"); } }, HOLD_MS);
     }
   });
@@ -887,8 +898,12 @@ function enableCellTap(grid, track) {
     if (noteDrag && noteDrag.grid === grid && noteDrag.id === e.pointerId) { noteDragMove(e); return; }
     if (!tap || e.pointerId !== tap.id) return;
     if (Math.abs(e.clientX - tap.x) > TAP_SLOP || Math.abs(e.clientY - tap.y) > TAP_SLOP) {
-      // 기존 노트를 '길게 누른 뒤(armed)' 드래그하면 그 노트 하나만 끌어 옮긴다.
-      if (tap.onCell && !moveMode && tap.armed) { clearHold(tap); startNoteDrag(e, grid, track, tap.cell); tap = null; }
+      // 기존 노트(한 칸/반칸)를 '길게 누른 뒤(armed)' 드래그하면 그 노트 하나만 끌어 옮긴다.
+      if ((tap.onCell || tap.halfCell) && !moveMode && tap.armed) {
+        clearHold(tap);
+        startNoteDrag(e, grid, track, tap.cell, pickDragHalf(tap)); // 누른 위치로 한 칸/반칸 중 어느 노트를 잡을지 결정
+        tap = null;
+      }
       else { clearHold(tap); tap.moved = true; } // 아직 준비 전 움직임 → 스크롤로 취급(노트 안 옮김)
     }
   });
@@ -921,9 +936,17 @@ function enableCellTap(grid, track) {
 }
 
 // ── 기존 노트 한 개를 끌어 옮기기(일반 모드) ──────────────────
-let noteDrag = null; // { id, grid, track, srcR, srcC, curR, curC }
-function startNoteDrag(e, grid, track, cell) {
-  noteDrag = { id: e.pointerId, grid, track, srcR: cell._r, srcC: cell._c, curR: cell._r, curC: cell._c };
+let noteDrag = null; // { id, grid, track, srcR, srcC, curR, curC, isHalf }
+// 한 칸/반칸 노트가 한 칸에 함께 있을 때, 누른 위치(왼/오)로 어느 것을 잡을지 정한다.
+function pickDragHalf(tap) {
+  if (tap.onCell && tap.halfCell) {   // 둘 다 있으면 오른쪽 절반=반칸
+    const rect = tap.cell.getBoundingClientRect();
+    return tap.x >= rect.left + rect.width / 2;
+  }
+  return !!tap.halfCell;              // 하나만 있으면 그것
+}
+function startNoteDrag(e, grid, track, cell, isHalf) {
+  noteDrag = { id: e.pointerId, grid, track, srcR: cell._r, srcC: cell._c, curR: cell._r, curC: cell._c, isHalf: !!isHalf, curHalf: !!isHalf };
   try { grid.setPointerCapture(e.pointerId); } catch (x) {}
   e.preventDefault();
   cell.classList.add("note-dragging"); // 끌고 있는 원래 노트 표시(반투명)
@@ -935,26 +958,35 @@ function clearNoteTarget(track) {
 function noteDragMove(e) {
   const at = cellAt(e.clientX, e.clientY, noteDrag.track);
   if (!at) return; // 격자 밖·스크롤바 위 → 마지막 대상 유지
-  if (at.r === noteDrag.curR && at.c === noteDrag.curC) return;
+  // 반박자 활성(splitOn)이면 칸 안 좌/우까지 판정 → 반박자씩 이동(오른쪽 절반=반칸 슬롯).
+  // 반박자 꺼짐이면 원래 노트 종류(슬롯)를 유지한 채 한 칸씩 이동.
+  let half = noteDrag.isHalf;
+  if (splitOn()) {
+    const cel = noteDrag.track.cellEls[at.r] && noteDrag.track.cellEls[at.r][at.c];
+    if (cel) { const rc = cel.getBoundingClientRect(); half = e.clientX >= rc.left + rc.width / 2; }
+  }
+  if (at.r === noteDrag.curR && at.c === noteDrag.curC && half === noteDrag.curHalf) return;
   clearNoteTarget(noteDrag.track);
-  noteDrag.curR = at.r; noteDrag.curC = at.c;
+  noteDrag.curR = at.r; noteDrag.curC = at.c; noteDrag.curHalf = half;
   const el = noteDrag.track.cellEls[at.r] && noteDrag.track.cellEls[at.r][at.c];
-  if (el) el.classList.add("note-target"); // 놓일 자리 미리보기
+  if (el) el.classList.add("note-target"); // 놓일 자리 미리보기(칸 단위)
 }
 function noteDragUp(e, grid) {
   try { grid.releasePointerCapture(e.pointerId); } catch (x) {}
-  const { track, srcR, srcC, curR, curC } = noteDrag;
+  const { track, srcR, srcC, curR, curC, isHalf, curHalf } = noteDrag;
   noteDrag = null;
   clearNoteTarget(track);
   const src = track.cellEls[srcR] && track.cellEls[srcR][srcC];
   if (src) src.classList.remove("note-dragging");
-  if (curR === srcR && curC === srcC) return; // 제자리 → 변화 없음
-  // 그 노트만 이동: 소스 끄고 대상 켜기(겹치면 덮어씀)
-  track.grid[srcR][srcC] = false;
-  track.grid[curR][curC] = true;
-  if (src) src.classList.remove("on");
+  if (curR === srcR && curC === srcC && !!curHalf === !!isHalf) return; // 같은 슬롯 → 변화 없음
+  // 소스 슬롯(한 칸/반칸) 끄고 → 타겟 슬롯 켜기. splitOn이면 타겟이 반칸 슬롯일 수 있어 반박자씩 이동됨.
+  const srcArr = isHalf ? track.half : track.grid;
+  const dstArr = curHalf ? track.half : track.grid;
+  srcArr[srcR][srcC] = false;
+  dstArr[curR][curC] = true;
+  if (src) src.classList.remove(isHalf ? "half-on" : "on");
   const dst = track.cellEls[curR] && track.cellEls[curR][curC];
-  if (dst) dst.classList.add("on");
+  if (dst) dst.classList.add(curHalf ? "half-on" : "on");
   showEditMarker(curC); // 옮긴 칸 위치를 플레이바에 표식(핸들은 안 옮김)
   markDirty();
 }
