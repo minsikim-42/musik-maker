@@ -1813,6 +1813,7 @@ const MENU = [
   { ico: "⚙️", name: "환경설정", tag: "준비 중" },
   { ico: "📤", name: "WAV로 내보내기", action: () => { closeDrawer(); exportWav(); } },
   { ico: "🎼", name: "오선지 악보 보기", action: () => { closeDrawer(); openScoreModal(); } },
+  { ico: "📋", name: "JSON 내보내기/불러오기 (AI용)", action: () => { closeDrawer(); openJsonModal(); } },
 ];
 
 
@@ -2057,6 +2058,105 @@ function decodeShareBytes(b) {
 const modal = document.getElementById("modal");
 const modalTitle = document.getElementById("modalTitle");
 const modalBody = document.getElementById("modalBody");
+
+// ══════════════════════════════════════════════════════════════
+//  JSON 내보내기/불러오기 — AI·사람이 읽고 쓰기 쉬운 곡 포맷(음 이름 목록)
+// ══════════════════════════════════════════════════════════════
+// 격자 불리언 대신 음을 [{n,t,h?}]로: n=음이름(멜로디, 예 "C5"/"A#4") 또는 드럼줄(킥/스네어/하이햇),
+// t=칸(16분음표) 인덱스(0부터), h=true면 반칸(반박자). 트랙: instrument(기본악기 piano/synth/pluck/bass/
+// guitar/wind) 또는 type:"drums", 또는 sound(=sounds에 정의한 프리셋 이름). sounds=커스텀 신스 프리셋(선택).
+const DRUM_ALIASES = { "킥": "킥", kick: "킥", bd: "킥", "스네어": "스네어", snare: "스네어", sd: "스네어", "하이햇": "하이햇", hat: "하이햇", hihat: "하이햇", hh: "하이햇" };
+function songToJSON() {
+  const s = activeSession();
+  const d = serialize();
+  const out = { name: s ? s.name : "곡", bpm: d.bpm, bars: d.bars, beatUnit: d.beatUnit, barBeats: d.barBeats, sounds: (d.sounds || []).map((x) => ({ ...x })), tracks: [] };
+  for (const t of d.tracks) {
+    const rows = t.type === "drums" ? DRUM_ROWS : MELODY_NOTES;
+    const notes = [];
+    for (let r = 0; r < t.grid.length; r++) for (let c = 0; c < t.grid[r].length; c++) {
+      if (t.grid[r][c]) notes.push({ n: rows[r], t: c });
+      if (t.half && t.half[r] && t.half[r][c]) notes.push({ n: rows[r], t: c, h: true });
+    }
+    const tr = { name: t.name };
+    if (t.type === "drums") tr.type = "drums"; else tr.instrument = t.instrument;
+    if (t.volume) tr.volume = t.volume;
+    if (t.muted) tr.muted = true;
+    if (t.reverb) tr.reverb = true;
+    tr.notes = notes;
+    out.tracks.push(tr);
+  }
+  return out;
+}
+function friendlyToData(obj) {
+  const bpm = Math.max(40, Math.min(220, Math.round(obj.bpm || 120)));
+  const bars = Math.max(1, Math.round(obj.bars || 2));
+  const beatUnit = Math.max(1, Math.round(obj.beatUnit || 4));
+  const barBeats = Math.max(1, Math.round(obj.barBeats || 4));
+  const steps = bars * beatUnit * barBeats;
+  const srcSounds = Array.isArray(obj.sounds) ? obj.sounds : [];
+  const sounds = srcSounds.map((x) => ({ id: genSoundId(), ...defaultParams(), ...x }));
+  const idByName = {};
+  srcSounds.forEach((x, i) => { if (x && x.name) idByName[x.name] = sounds[i].id; });
+  const tracks = (Array.isArray(obj.tracks) ? obj.tracks : []).map((t) => {
+    const isDrums = t.type === "drums" || t.instrument === "drums";
+    const rows = isDrums ? DRUM_ROWS : MELODY_NOTES;
+    const grid = rows.map(() => new Array(steps).fill(false));
+    const half = rows.map(() => new Array(steps).fill(false));
+    for (const nt of (Array.isArray(t.notes) ? t.notes : [])) {
+      let name = String(nt.n == null ? "" : nt.n).trim();
+      if (isDrums) name = DRUM_ALIASES[name.toLowerCase()] || name;
+      const r = rows.indexOf(name);
+      const c = Math.round(nt.t);
+      if (r >= 0 && c >= 0 && c < steps) (nt.h ? half : grid)[r][c] = true;
+    }
+    let instrument;
+    if (isDrums) instrument = null;
+    else if (t.sound && idByName[t.sound]) instrument = "snd:" + idByName[t.sound];
+    else instrument = t.instrument || "piano";
+    return { type: isDrums ? "drums" : "melody", instrument, name: t.name || "트랙", muted: !!t.muted, volume: Number(t.volume) || 0, reverb: !!t.reverb, grid, half };
+  });
+  return { bpm, bars, beatUnit, barBeats, sounds, tracks };
+}
+function loadFriendlyJSON(obj) {
+  const data = friendlyToData(obj);
+  const sess = { id: genId(), name: String(obj.name || "불러온 곡").slice(0, 60), updatedAt: Date.now(), data };
+  sessions.unshift(sess);
+  persistSessions();
+  openSession(sess.id);
+  renderSessionList();
+}
+function openJsonModal() {
+  modalTitle.textContent = "📋 JSON 내보내기 / 불러오기";
+  modalBody.innerHTML = "";
+  const intro = document.createElement("p");
+  intro.textContent = '곡을 AI가 읽고 쓰기 쉬운 JSON으로 주고받습니다. 음은 {"n":"C5","t":0}(음이름·칸번호), 반박자는 "h":true. 드럼은 킥/스네어/하이햇.';
+  modalBody.appendChild(intro);
+
+  const expTitle = document.createElement("div"); expTitle.className = "synth-section"; expTitle.textContent = "내보내기 (지금 곡 → JSON)";
+  modalBody.appendChild(expTitle);
+  const exp = document.createElement("textarea"); exp.className = "json-area"; exp.readOnly = true; exp.rows = 8;
+  exp.value = JSON.stringify(songToJSON(), null, 1);
+  modalBody.appendChild(exp);
+  const copyRow = document.createElement("div"); copyRow.className = "share-row";
+  const copyBtn = document.createElement("button"); copyBtn.textContent = "복사";
+  copyBtn.addEventListener("click", async () => { const ok = await copyText(exp.value, exp); copyBtn.textContent = ok ? "복사됨 ✓" : "직접 복사하세요"; setTimeout(() => (copyBtn.textContent = "복사"), 1500); });
+  copyRow.appendChild(copyBtn); modalBody.appendChild(copyRow);
+
+  const impTitle = document.createElement("div"); impTitle.className = "synth-section"; impTitle.textContent = "불러오기 (JSON → 새 곡)";
+  modalBody.appendChild(impTitle);
+  const imp = document.createElement("textarea"); imp.className = "json-area"; imp.rows = 8; imp.placeholder = "여기에 곡 JSON을 붙여넣으세요";
+  modalBody.appendChild(imp);
+  const loadRow = document.createElement("div"); loadRow.className = "share-row";
+  const loadBtn = document.createElement("button"); loadBtn.className = "primary"; loadBtn.textContent = "불러오기";
+  loadBtn.addEventListener("click", () => {
+    let obj; try { obj = JSON.parse(imp.value); } catch (e) { showToast("JSON 형식이 올바르지 않습니다"); return; }
+    if (!obj || !Array.isArray(obj.tracks)) { showToast("tracks 배열이 필요합니다"); return; }
+    try { loadFriendlyJSON(obj); modal.hidden = true; showToast("불러온 곡을 열었습니다"); }
+    catch (e) { showToast("불러오기 실패: " + e.message); }
+  });
+  loadRow.appendChild(loadBtn); modalBody.appendChild(loadRow);
+  modal.hidden = false;
+}
 
 async function openShareModal() {
   const s = activeSession();

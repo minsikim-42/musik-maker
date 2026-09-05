@@ -635,6 +635,18 @@ footer { margin-top: 14px; color: var(--muted); font-size: 12px; }
 .modal-head .icon-btn { width: 32px; height: 32px; padding: 0; align-items: center; gap: 0; font-size: 14px; }
 #modalBody p { color: var(--muted); font-size: 13px; line-height: 1.5; margin: 0 0 12px; }
 .share-row { display: flex; gap: 8px; margin-bottom: 12px; }
+.json-area {
+  width: 100%; box-sizing: border-box;
+  background: #10141c;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 12px;
+  color: var(--text);
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 12px; line-height: 1.5;
+  resize: vertical;
+  margin-bottom: 8px;
+}
 .share-url {
   flex: 1; min-width: 0;
   background: #10141c;
