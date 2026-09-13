@@ -2070,7 +2070,8 @@ const DRUM_ALIASES = { "킥": "킥", kick: "킥", bd: "킥", "스네어": "스�
 function songToJSON() {
   const s = activeSession();
   const d = serialize();
-  const out = { name: s ? s.name : "곡", bpm: d.bpm, bars: d.bars, beatUnit: d.beatUnit, barBeats: d.barBeats, sounds: (d.sounds || []).map((x) => ({ ...x })), tracks: [] };
+  // steps = 칸 수(=t의 최댓값+1). 정보용 힌트 — 불러오기는 이 값을 무시하고 bars×beatUnit×barBeats로 다시 계산한다.
+  const out = { name: s ? s.name : "곡", bpm: d.bpm, bars: d.bars, beatUnit: d.beatUnit, barBeats: d.barBeats, steps: d.bars * d.beatUnit * d.barBeats, sounds: (d.sounds || []).map((x) => ({ ...x })), tracks: [] };
   for (const t of d.tracks) {
     const rows = t.type === "drums" ? DRUM_ROWS : MELODY_NOTES;
     const notes = [];
@@ -2088,7 +2089,9 @@ function songToJSON() {
   }
   return out;
 }
-function friendlyToData(obj) {
+// report(선택): 넘기면 배치/무시된 노트를 집계한다 — 조용히 삼키지 않고 AI·사용자에게 피드백.
+//   report = { placed, bad:[{track,n}], oob:[{track,n,t}] }  (bad=모르는 음이름, oob=칸 범위 밖 t)
+function friendlyToData(obj, report) {
   const bpm = Math.max(40, Math.min(220, Math.round(obj.bpm || 120)));
   const bars = Math.max(1, Math.round(obj.bars || 2));
   const beatUnit = Math.max(1, Math.round(obj.beatUnit || 4));
@@ -2103,34 +2106,54 @@ function friendlyToData(obj) {
     const rows = isDrums ? DRUM_ROWS : MELODY_NOTES;
     const grid = rows.map(() => new Array(steps).fill(false));
     const half = rows.map(() => new Array(steps).fill(false));
+    const tname = t.name || "트랙";
     for (const nt of (Array.isArray(t.notes) ? t.notes : [])) {
       let name = String(nt.n == null ? "" : nt.n).trim();
       if (isDrums) name = DRUM_ALIASES[name.toLowerCase()] || name;
       const r = rows.indexOf(name);
       const c = Math.round(nt.t);
-      if (r >= 0 && c >= 0 && c < steps) (nt.h ? half : grid)[r][c] = true;
+      if (r < 0) { if (report) report.bad.push({ track: tname, n: nt.n }); continue; }
+      if (!(c >= 0 && c < steps)) { if (report) report.oob.push({ track: tname, n: nt.n, t: nt.t }); continue; }
+      (nt.h ? half : grid)[r][c] = true;
+      if (report) report.placed++;
     }
     let instrument;
     if (isDrums) instrument = null;
     else if (t.sound && idByName[t.sound]) instrument = "snd:" + idByName[t.sound];
     else instrument = t.instrument || "piano";
-    return { type: isDrums ? "drums" : "melody", instrument, name: t.name || "트랙", muted: !!t.muted, volume: Number(t.volume) || 0, reverb: !!t.reverb, grid, half };
+    return { type: isDrums ? "drums" : "melody", instrument, name: tname, muted: !!t.muted, volume: Number(t.volume) || 0, reverb: !!t.reverb, grid, half };
   });
   return { bpm, bars, beatUnit, barBeats, sounds, tracks };
 }
+// 상태를 바꾸지 않고 곡 JSON을 검증(dry-run). AI가 불러오기 전에 유효성·드롭 여부를 확인하는 용도.
+//   반환 { ok, placed, dropped, badNames:[..], oob:[{track,n,t}..], steps, errors:[..] }
+function validateFriendlyJSON(obj) {
+  const errors = [];
+  if (!obj || typeof obj !== "object" || Array.isArray(obj)) return { ok: false, placed: 0, dropped: 0, badNames: [], oob: [], steps: 0, errors: ["곡 객체(JSON)가 아닙니다"] };
+  if (!Array.isArray(obj.tracks)) errors.push("tracks 배열이 필요합니다");
+  const report = { placed: 0, bad: [], oob: [] };
+  let steps = 0;
+  try { const d = friendlyToData(obj, report); steps = d.bars * d.beatUnit * d.barBeats; }
+  catch (e) { errors.push(e.message); }
+  const badNames = [...new Set(report.bad.map((b) => b.n))];
+  return { ok: errors.length === 0, placed: report.placed, dropped: report.bad.length + report.oob.length, badNames, oob: report.oob, steps, errors };
+}
+// 불러온 곡을 새 세션으로 담고 연다. 배치/무시 집계 리포트를 반환(호출부가 사용자에게 안내).
 function loadFriendlyJSON(obj) {
-  const data = friendlyToData(obj);
+  const report = { placed: 0, bad: [], oob: [] };
+  const data = friendlyToData(obj, report);
   const sess = { id: genId(), name: String(obj.name || "불러온 곡").slice(0, 60), updatedAt: Date.now(), data };
   sessions.unshift(sess);
   persistSessions();
   openSession(sess.id);
   renderSessionList();
+  return report;
 }
 function openJsonModal() {
   modalTitle.textContent = "📋 JSON 내보내기 / 불러오기";
   modalBody.innerHTML = "";
   const intro = document.createElement("p");
-  intro.textContent = '곡을 AI가 읽고 쓰기 쉬운 JSON으로 주고받습니다. 음은 {"n":"C5","t":0}(음이름·칸번호), 반박자는 "h":true. 드럼은 킥/스네어/하이햇.';
+  intro.textContent = '곡을 AI가 읽고 쓰기 쉬운 JSON으로 주고받습니다. 음은 {"n":"C5","t":0}(음이름·칸번호), 반박자는 "h":true. 드럼은 킥/스네어/하이햇. 불러올 때 모르는 음이름·범위 밖 칸은 무시되고 몇 개가 무시됐는지 알려줍니다.';
   modalBody.appendChild(intro);
 
   const expTitle = document.createElement("div"); expTitle.className = "synth-section"; expTitle.textContent = "내보내기 (지금 곡 → JSON)";
@@ -2152,7 +2175,19 @@ function openJsonModal() {
   loadBtn.addEventListener("click", () => {
     let obj; try { obj = JSON.parse(imp.value); } catch (e) { showToast("JSON 형식이 올바르지 않습니다"); return; }
     if (!obj || !Array.isArray(obj.tracks)) { showToast("tracks 배열이 필요합니다"); return; }
-    try { loadFriendlyJSON(obj); modal.hidden = true; showToast("불러온 곡을 열었습니다"); }
+    try {
+      const rep = loadFriendlyJSON(obj);
+      modal.hidden = true;
+      const dropped = rep.bad.length + rep.oob.length;
+      let msg = `불러왔습니다 — 음 ${rep.placed}개 배치`;
+      if (dropped) {
+        const parts = [];
+        if (rep.bad.length) parts.push(`음이름 ${new Set(rep.bad.map((b) => b.n)).size}종 인식 실패`);
+        if (rep.oob.length) parts.push(`${rep.oob.length}개 칸 범위 초과`);
+        msg += `, ${dropped}개 무시 (${parts.join(", ")})`;
+      }
+      showToast(msg);
+    }
     catch (e) { showToast("불러오기 실패: " + e.message); }
   });
   loadRow.appendChild(loadBtn); modalBody.appendChild(loadRow);

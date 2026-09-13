@@ -84,7 +84,7 @@ git add -A && git commit -m "..." && git push
 | 컨트롤 배선 | `setBpm` `changeBars` `setBeatUnit` `setBarBeats` `syncTracksHorizontally` | 재생/템포/박자(박·마디)/트랙추가/공유/🔒트랙고정/줌. **곡 길이(마디)는 격자 오른쪽 끝 ＋/－** (`changeBars`) |
 | 드로어+메뉴 | `MENU` `openDrawer` `showToast` | 왼쪽 "내 곡" 목록 + 기능 메뉴 |
 | 링크 공유 | `encodeShare` `decodeShare` `gzipBytes` `openShareModal` `importFromHash` | 곡을 URL에 비트패킹(길면 gzip `#songz=`) |
-| JSON(AI용) ★ | `songToJSON` `friendlyToData` `loadFriendlyJSON` `openJsonModal` | 곡을 **음이름 목록 JSON**으로 주고받기(AI가 곡을 읽고 쓰기 쉬움. 아래 전용 섹션) |
+| JSON(AI용) ★ | `songToJSON` `friendlyToData` `validateFriendlyJSON` `loadFriendlyJSON` `openJsonModal` | 곡을 **음이름 목록 JSON**으로 주고받기(AI가 곡을 읽고 쓰기 쉬움. 드롭 리포트+dry-run 검증. 아래 전용 섹션) |
 | WAV 내보내기 | `exportWav` `scheduleTrackOffline` `audioBufferToWav` | `Tone.Offline` 렌더 → 16비트 PCM WAV |
 | 오선지 악보 | `buildScoreSVG` `openScoreModal` `noteToStaff` `scoreToPng` | 격자를 5선 악보(SVG)로 + PNG 저장(멜로디만) |
 | 시작 | (하단) | localStorage 로드 → 해시 임포트 or 지난 곡 or 새 곡 |
@@ -191,6 +191,7 @@ git add -A && git commit -m "..." && git push
 ```jsonc
 {
   "name": "곡 이름", "bpm": 120, "bars": 2, "beatUnit": 4, "barBeats": 4,
+  "steps": 32,   // 내보내기에만 붙는 정보용 힌트(=t 최댓값+1). 불러오기는 무시하고 다시 계산
   "sounds": [ /* 커스텀 소리(신스/샘플) 객체 그대로. 선택 */ ],
   "tracks": [
     { "instrument": "piano",              // 멜로디: piano|synth|pluck|bass|guitar|wind, 또는 "sound":"<소리이름>"
@@ -203,10 +204,14 @@ git add -A && git commit -m "..." && git push
 ```
 - **음(note)** = `{ n: 음이름, t: 칸번호(0부터), h?: true }`. `n`은 멜로디는 `"C5"`/`"F#4"`(C6~C3), 드럼은 `킥`/`스네어`/`하이햇`
   (`DRUM_ALIASES`로 kick/snare/hihat/hh 등도 받음). `h:true`면 그 칸의 **반박자(32분음표) 뒤**에 찍힌다.
-- **칸 수** = `bars * beatUnit * barBeats`. 즉 `t`는 `0 ~ steps-1`. 범위 밖·모르는 음이름은 무시된다.
-- `songToJSON()`=내보내기, `friendlyToData()`/`loadFriendlyJSON()`=불러오기(**새 세션으로** 담고 연다). 커스텀 소리는 `sounds`에
+- **칸 수** = `bars * beatUnit * barBeats`(내보내기의 `steps`). 즉 `t`는 `0 ~ steps-1`. **범위 밖 `t`·모르는 음이름은 배치되지 않고 리포트에 집계된다**(아래).
+- `songToJSON()`=내보내기, `friendlyToData(obj, report?)`/`loadFriendlyJSON()`=불러오기(**새 세션으로** 담고 연다). 커스텀 소리는 `sounds`에
   넣고 트랙에서 `"sound":"<그 소리 name>"`으로 참조. **오디오 샘플의 실제 오디오는 JSON에 안 담긴다**(파라미터만).
-- 곡을 코드로 만들어 검증할 때: `loadFriendlyJSON(obj)`를 직접 호출하거나, 모달 textarea에 붙여 넣고 "불러오기".
+- **조용히 삼키지 않는다**: `loadFriendlyJSON`은 `{ placed, bad:[{track,n}], oob:[{track,n,t}] }` 리포트를 반환하고, 모달은
+  "음 N개 배치, M개 무시(음이름 X종 인식 실패, Y개 칸 범위 초과)" 토스트를 띄운다 → **AI가 자기 실수를 즉시 인지**.
+- **`validateFriendlyJSON(obj)` = 상태를 안 바꾸는 dry-run 검증**. `{ ok, placed, dropped, badNames, oob, steps, errors }` 반환.
+  AI가 불러오기 전 유효성·드롭 여부를 확인하는 용도(세션·소리·격자를 만들지 않음).
+- 곡을 코드로 만들어 검증할 때: `validateFriendlyJSON(obj)`로 먼저 점검하거나, `loadFriendlyJSON(obj)`를 직접 호출, 또는 모달 textarea에 붙여 "불러오기".
 
 ---
 
