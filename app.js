@@ -763,7 +763,7 @@ function renderTrack(track) {
     track._scrollLeft = box.scrollLeft;
     syncTracksHorizontally(box); // '트랙 고정'이 켜져 있으면 나머지 트랙 가로도 맞춘다
   });
-  if (track.type === "melody") enableDragScroll(box, grid, track); // 마우스 세로 드래그(grid._dragged로 클릭 취소)
+  enableDragScroll(box, grid, track); // 마우스 가로·세로 드래그 스크롤(grid._dragged로 클릭 취소)
   enableCellTap(grid, track); // 관대한 탭으로 음 찍기(살짝 움직이거나 오래 눌러도 인식)
 
   const rowH = zoomH + 2; // 셀 높이 + 간격 2 (세로 줌 반영)
@@ -776,7 +776,7 @@ function renderTrack(track) {
   return wrap;
 }
 
-// 마우스로 세로 컨테이너를 끌면 스크롤(음역 이동). 터치는 브라우저 기본 스크롤(pan-y)에 맡긴다.
+// 마우스로 격자를 끌면 스크롤(가로=시간 이동, 세로=음역 이동). 터치는 브라우저 기본 스크롤(pan-x pan-y)에 맡긴다.
 // 이동 문턱(10px)을 넘어야 드래그로 보고 셀 탭(음 찍기)을 취소한다(flagEl._dragged).
 // 문턱을 6→10으로 키운 이유: 클릭할 때 손이 살짝 흔들려도(≤10px) 음이 찍히도록.
 function enableDragScroll(scrollEl, flagEl, track) {
@@ -785,15 +785,16 @@ function enableDragScroll(scrollEl, flagEl, track) {
     if (moveMode && mvTrack === track) return;             // 이동 중인 트랙만 드래그=선택/이동(다른 트랙은 정상 스크롤)
     if (noteAt(e.clientX, e.clientY, track)) return; // 노트(한 칸/반칸, 반칸 넘침 영역 포함) 위에서 시작 → 노트 끌기(스크롤 안 함)
     if (e.pointerType !== "mouse" || e.button !== 0) return; // 터치/펜은 기본 스크롤
-    st = { y: e.clientY, top: scrollEl.scrollTop, moved: false };
+    st = { x: e.clientX, y: e.clientY, left: scrollEl.scrollLeft, top: scrollEl.scrollTop, moved: false };
     flagEl._dragged = false;
   });
   scrollEl.addEventListener("pointermove", (e) => {
     if (!st) return;
-    const dy = e.clientY - st.y;
-    if (!st.moved && Math.abs(dy) < 10) return;
+    const dx = e.clientX - st.x, dy = e.clientY - st.y;
+    if (!st.moved && Math.hypot(dx, dy) < 10) return;
     st.moved = true;
     flagEl._dragged = true;
+    scrollEl.scrollLeft = st.left - dx;
     scrollEl.scrollTop = st.top - dy;
     try { scrollEl.setPointerCapture(e.pointerId); } catch {}
     e.preventDefault();
