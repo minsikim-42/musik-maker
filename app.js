@@ -1815,6 +1815,7 @@ const MENU = [
   { ico: "📤", name: "WAV로 내보내기", action: () => { closeDrawer(); exportWav(); } },
   { ico: "🎼", name: "오선지 악보 보기", action: () => { closeDrawer(); openScoreModal(); } },
   { ico: "📋", name: "JSON 내보내기/불러오기 (AI용)", action: () => { closeDrawer(); openJsonModal(); } },
+  { ico: "🎵", name: "MIDI 내보내기/불러오기", action: () => { closeDrawer(); openMidiModal(); } },
 ];
 
 
@@ -2191,6 +2192,211 @@ function openJsonModal() {
     catch (e) { showToast("불러오기 실패: " + e.message); }
   });
   loadRow.appendChild(loadBtn); modalBody.appendChild(loadRow);
+  modal.hidden = false;
+}
+
+// ══════════════════════════════════════════════════════════════
+//  MIDI 내보내기/불러오기 (표준 SMF, 외부 라이브러리 없음)
+//  격자 1칸 = 16분음표. PPQ 480 → 1칸=120틱, 반칸(32분음표)=+60틱(재생과 동일: (60/bpm)/4초/칸).
+//  드럼은 GM 드럼(채널 10): 킥36·스네어38·하이햇42. 불러오기는 가장 가까운 32분음표에 양자화(약간 손실).
+// ══════════════════════════════════════════════════════════════
+const MIDI_PPQ = 480;
+const TICKS_PER_CELL = MIDI_PPQ / 4;                 // 16분음표 = 1칸
+const DRUM_GM = { "킥": 36, "스네어": 38, "하이햇": 42 };
+const GM_TO_DRUM = { 35: "킥", 36: "킥", 38: "스네어", 40: "스네어", 42: "하이햇", 44: "하이햇", 46: "하이햇" };
+
+// 음이름("C5"/"F#4") → MIDI 번호(C4=60). 실패 시 null.
+function noteNameToMidi(name) {
+  const m = /^([A-G]#?)(-?\d+)$/.exec(String(name).trim());
+  if (!m) return null;
+  const pc = NOTE_NAMES.indexOf(m[1]);
+  if (pc < 0) return null;
+  return (parseInt(m[2], 10) + 1) * 12 + pc;
+}
+// MIDI 번호 → 멜로디 음역(C3~C6=48~84) 안의 음이름. 밖이면 옥타브(±12) 이동해 맞춘다.
+function midiToMelodyName(midi) {
+  let m = midi;
+  while (m < 48) m += 12;
+  while (m > 84) m -= 12;
+  return NOTE_NAMES[((m % 12) + 12) % 12] + (Math.floor(m / 12) - 1);
+}
+
+// ── SMF 바이트 조립 헬퍼 ──
+function encodeVLQ(n) { const out = [n & 0x7f]; n = Math.floor(n / 128); while (n > 0) { out.unshift((n & 0x7f) | 0x80); n = Math.floor(n / 128); } return out; }
+function chunkBytes(id, bytes) { const len = bytes.length; return [id.charCodeAt(0), id.charCodeAt(1), id.charCodeAt(2), id.charCodeAt(3), (len >>> 24) & 0xff, (len >>> 16) & 0xff, (len >>> 8) & 0xff, len & 0xff, ...bytes]; }
+function metaText(type, str) { const b = [...new TextEncoder().encode(str)]; return [0xff, type, ...encodeVLQ(b.length), ...b]; } // 앞 델타는 midiTrackChunk가 붙인다
+function midiTrackChunk(events) { // events: [{tick(절대), data:[..]}] → 델타 인코딩 + End of Track
+  const bytes = []; let last = 0;
+  for (const ev of events) { const delta = ev.tick - last; last = ev.tick; bytes.push(...encodeVLQ(delta), ...ev.data); }
+  bytes.push(0x00, 0xff, 0x2f, 0x00);
+  return chunkBytes("MTrk", bytes);
+}
+const isNoteOff = (ev) => (ev.data[0] & 0xf0) === 0x80;
+
+// 지금 곡 → 표준 MIDI 파일 저장(포맷 1: 지휘 트랙 + 트랙별 1개).
+function exportMidi() {
+  const withNotes = tracks.filter((t) => t.grid.some((row) => row.some(Boolean)) || (t.half && t.half.some((row) => row.some(Boolean))));
+  if (!withNotes.length) { showToast("먼저 음을 찍어 주세요"); return; }
+  const bpmVal = Number(bpm.value) || 120;
+  const usPerQ = Math.round(60000000 / bpmVal);
+  const s = activeSession();
+  const chunks = [];
+  // 지휘 트랙: 템포 · 박자표(분모=4분음표 고정) · 곡 이름
+  chunks.push(midiTrackChunk([
+    { tick: 0, data: [0xff, 0x51, 0x03, (usPerQ >> 16) & 0xff, (usPerQ >> 8) & 0xff, usPerQ & 0xff] },
+    { tick: 0, data: [0xff, 0x58, 0x04, barBeats, 2, 24, 8] },
+    { tick: 0, data: metaText(0x03, s ? s.name : "song") },
+  ]));
+  let chCounter = 0;
+  const nextMelodyCh = () => { let c = chCounter++; if (c >= 9) c++; return c & 15; }; // 드럼 채널 10(idx 9)은 건너뜀
+  for (const t of withNotes) {
+    const isDrums = t.type === "drums";
+    const ch = isDrums ? 9 : nextMelodyCh();
+    const rows = isDrums ? DRUM_ROWS : MELODY_NOTES;
+    const ev = [{ tick: 0, data: metaText(0x03, t.name || (isDrums ? "드럼" : "멜로디")) }];
+    if (!isDrums) ev.push({ tick: 0, data: [0xc0 | ch, 0] }); // 프로그램=Acoustic Grand(참고용)
+    const add = (r, c, offset, dur) => {
+      const midi = isDrums ? DRUM_GM[rows[r]] : noteNameToMidi(rows[r]);
+      if (midi == null) return;
+      const on = c * TICKS_PER_CELL + offset;
+      ev.push({ tick: on, data: [0x90 | ch, midi, 100] });
+      ev.push({ tick: on + dur, data: [0x80 | ch, midi, 0x40] });
+    };
+    for (let r = 0; r < t.grid.length; r++) for (let c = 0; c < t.grid[r].length; c++) {
+      if (t.grid[r][c]) add(r, c, 0, TICKS_PER_CELL);
+      if (t.half && t.half[r] && t.half[r][c]) add(r, c, TICKS_PER_CELL / 2, TICKS_PER_CELL / 2);
+    }
+    ev.sort((a, b) => (a.tick - b.tick) || ((isNoteOff(a) ? 0 : 1) - (isNoteOff(b) ? 0 : 1))); // 같은 틱이면 노트오프 먼저
+    chunks.push(midiTrackChunk(ev));
+  }
+  const n = chunks.length;
+  const header = chunkBytes("MThd", [0, 1, (n >> 8) & 0xff, n & 0xff, (MIDI_PPQ >> 8) & 0xff, MIDI_PPQ & 0xff]);
+  const blob = new Blob([new Uint8Array([].concat(header, ...chunks))], { type: "audio/midi" });
+  const base = (s ? s.name : "song").replace(/[\\/:*?"<>|]+/g, "_").trim() || "song";
+  downloadBlob(blob, base + ".mid");
+  showToast("MIDI 내보내기 완료 ✓");
+}
+
+// 표준 MIDI 파일 파싱 → { ppq, bpm, tracks:[{name, notes:[{tick,ch,midi}]}] }(노트온만 모음).
+function parseMidi(arrayBuffer) {
+  const dv = new DataView(arrayBuffer); let p = 0;
+  const str = (nn) => { let x = ""; for (let i = 0; i < nn; i++) x += String.fromCharCode(dv.getUint8(p++)); return x; };
+  const u32 = () => { const v = dv.getUint32(p); p += 4; return v; };
+  const u16 = () => { const v = dv.getUint16(p); p += 2; return v; };
+  if (str(4) !== "MThd") throw new Error("유효한 MIDI 파일이 아닙니다");
+  const hlen = u32(); u16(); const ntracks = u16(); const division = u16(); p += hlen - 6;
+  if (division & 0x8000) throw new Error("SMPTE 타임코드 MIDI는 지원하지 않습니다");
+  let usPerQ = 500000; // 기본 120bpm
+  const out = [];
+  for (let ti = 0; ti < ntracks; ti++) {
+    if (str(4) !== "MTrk") { const l = u32(); p += l; continue; }
+    const len = u32(); const end = p + len;
+    let tick = 0, status = 0, tname = ""; const notes = [];
+    while (p < end) {
+      let delta = 0, b; do { b = dv.getUint8(p++); delta = delta * 128 + (b & 0x7f); } while (b & 0x80);
+      tick += delta;
+      let ev = dv.getUint8(p);
+      if (ev & 0x80) { status = ev; p++; } else { ev = status; } // 러닝 스테이터스
+      const type = ev & 0xf0;
+      if (ev === 0xff) { // 메타
+        const mt = dv.getUint8(p++); let ml = 0, mb; do { mb = dv.getUint8(p++); ml = ml * 128 + (mb & 0x7f); } while (mb & 0x80);
+        if (mt === 0x51 && ml === 3) usPerQ = (dv.getUint8(p) << 16) | (dv.getUint8(p + 1) << 8) | dv.getUint8(p + 2);
+        if (mt === 0x03) { try { tname = new TextDecoder("utf-8").decode(new Uint8Array(arrayBuffer, p, ml)); } catch (e) {} } // UTF-8 트랙 이름
+        p += ml;
+      } else if (ev === 0xf0 || ev === 0xf7) { let sl = 0, sb; do { sb = dv.getUint8(p++); sl = sl * 128 + (sb & 0x7f); } while (sb & 0x80); p += sl; }
+      else if (type === 0x90) { const note = dv.getUint8(p++); const vel = dv.getUint8(p++); if (vel > 0) notes.push({ tick, ch: ev & 0x0f, midi: note }); }
+      else if (type === 0x80) { p += 2; }
+      else if (type === 0xc0 || type === 0xd0) { p += 1; }
+      else { p += 2; } // 0xA0/0xB0/0xE0
+    }
+    p = end;
+    out.push({ name: tname, notes });
+  }
+  return { ppq: division, bpm: Math.round(60000000 / usPerQ), tracks: out };
+}
+
+// 파싱 결과 → 곡 data + 리포트. 32분음표에 양자화, 채널10=드럼, 음역 밖은 옥타브 이동.
+function midiToSongData(parsed) {
+  const tpc = parsed.ppq / 4;             // 1칸(16분음표) 틱
+  const report = { placed: 0, dropped: 0, transposed: 0 };
+  const CAP_BARS = 64, CAP_CELLS = CAP_BARS * 16;
+  const conv = (n) => { const hi = Math.round(n.tick / (tpc / 2)); return { cell: Math.floor(hi / 2), half: (hi % 2) === 1 }; };
+  const appTracks = [];
+  for (const st of parsed.tracks) {
+    if (!st.notes.length) continue;
+    const mel = st.notes.filter((n) => n.ch !== 9), dr = st.notes.filter((n) => n.ch === 9);
+    if (mel.length) appTracks.push({ type: "melody", name: st.name || "멜로디", src: mel });
+    // 한 MIDI 트랙이 멜로디+드럼을 함께 가지면 드럼 쪽에 접미사로 구분, 드럼 전용이면 이름 그대로.
+    if (dr.length) appTracks.push({ type: "drums", name: mel.length && st.name ? st.name + " 드럼" : st.name || "드럼", src: dr });
+  }
+  if (!appTracks.length) throw new Error("노트가 있는 트랙이 없습니다");
+  let maxCell = 0;
+  for (const at of appTracks) for (const n of at.src) { const { cell } = conv(n); if (cell <= CAP_CELLS) maxCell = Math.max(maxCell, cell); }
+  const bars = Math.max(1, Math.min(CAP_BARS, Math.ceil((maxCell + 1) / 16)));
+  const beatUnit = 4, barBeats = 4, stepsN = bars * beatUnit * barBeats;
+  const outTracks = appTracks.map((at) => {
+    const isDrums = at.type === "drums";
+    const rows = isDrums ? DRUM_ROWS : MELODY_NOTES;
+    const grid = rows.map(() => new Array(stepsN).fill(false));
+    const half = rows.map(() => new Array(stepsN).fill(false));
+    for (const n of at.src) {
+      const { cell, half: isHalf } = conv(n);
+      if (cell < 0 || cell >= stepsN) { report.dropped++; continue; }
+      let r;
+      if (isDrums) { const nm = GM_TO_DRUM[n.midi]; r = nm ? rows.indexOf(nm) : -1; }
+      else { if (n.midi < 48 || n.midi > 84) report.transposed++; r = rows.indexOf(midiToMelodyName(n.midi)); }
+      if (r < 0) { report.dropped++; continue; }
+      (isHalf ? half : grid)[r][cell] = true; report.placed++;
+    }
+    return { type: isDrums ? "drums" : "melody", instrument: isDrums ? null : "piano", name: at.name, muted: false, volume: 0, reverb: false, grid, half };
+  });
+  return { data: { bpm: Math.max(40, Math.min(220, parsed.bpm)), bars, beatUnit, barBeats, sounds: [], tracks: outTracks }, report };
+}
+
+// .mid 바이트 → 새 세션으로 담고 연다. 리포트 반환(호출부가 안내).
+function loadMidiArrayBuffer(ab, fname) {
+  const parsed = parseMidi(ab);
+  const { data, report } = midiToSongData(parsed);
+  const nm = String(fname || "MIDI 곡").replace(/\.midi?$/i, "").slice(0, 60) || "MIDI 곡";
+  const sess = { id: genId(), name: nm, updatedAt: Date.now(), data };
+  sessions.unshift(sess); persistSessions(); openSession(sess.id); renderSessionList();
+  return report;
+}
+
+function openMidiModal() {
+  modalTitle.textContent = "🎵 MIDI 내보내기 / 불러오기";
+  modalBody.innerHTML = "";
+  const intro = document.createElement("p");
+  intro.textContent = "표준 MIDI(.mid)로 주고받습니다. 다른 DAW(로직·큐베이스·개러지밴드 등)와 호환됩니다. 불러올 때는 격자(16분음표)에 맞춰 양자화되고, 음역(C3~C6) 밖 음은 옥타브를 옮겨 담습니다.";
+  modalBody.appendChild(intro);
+
+  const expTitle = document.createElement("div"); expTitle.className = "synth-section"; expTitle.textContent = "내보내기 (지금 곡 → .mid)";
+  modalBody.appendChild(expTitle);
+  const expRow = document.createElement("div"); expRow.className = "share-row";
+  const expBtn = document.createElement("button"); expBtn.className = "primary"; expBtn.textContent = "MIDI 파일 저장";
+  expBtn.addEventListener("click", () => exportMidi());
+  expRow.appendChild(expBtn); modalBody.appendChild(expRow);
+
+  const impTitle = document.createElement("div"); impTitle.className = "synth-section"; impTitle.textContent = "불러오기 (.mid → 새 곡)";
+  modalBody.appendChild(impTitle);
+  const impRow = document.createElement("div"); impRow.className = "share-row";
+  const fileInput = document.createElement("input"); fileInput.type = "file"; fileInput.accept = ".mid,.midi,audio/midi";
+  fileInput.addEventListener("change", async () => {
+    const f = fileInput.files && fileInput.files[0]; if (!f) return;
+    try {
+      const ab = await f.arrayBuffer();
+      await Tone.start(); // openSession이 신스를 다시 만들므로 오디오 컨텍스트 먼저(사용자 제스처=파일 선택)
+      const rep = loadMidiArrayBuffer(ab, f.name);
+      modal.hidden = true;
+      let msg = `불러왔습니다 — 음 ${rep.placed}개`;
+      const extra = [];
+      if (rep.dropped) extra.push(`${rep.dropped}개 무시`);
+      if (rep.transposed) extra.push(`${rep.transposed}개 옥타브 이동`);
+      if (extra.length) msg += ` (${extra.join(", ")})`;
+      showToast(msg);
+    } catch (e) { showToast("MIDI 불러오기 실패: " + e.message); }
+  });
+  impRow.appendChild(fileInput); modalBody.appendChild(impRow);
   modal.hidden = false;
 }
 

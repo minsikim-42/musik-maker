@@ -86,6 +86,7 @@ git add -A && git commit -m "..." && git push
 | 링크 공유 | `encodeShare` `decodeShare` `gzipBytes` `openShareModal` `importFromHash` | 곡을 URL에 비트패킹(길면 gzip `#songz=`) |
 | JSON(AI용) ★ | `songToJSON` `friendlyToData` `validateFriendlyJSON` `loadFriendlyJSON` `openJsonModal` | 곡을 **음이름 목록 JSON**으로 주고받기(AI가 곡을 읽고 쓰기 쉬움. 드롭 리포트+dry-run 검증. 아래 전용 섹션) |
 | WAV 내보내기 | `exportWav` `scheduleTrackOffline` `audioBufferToWav` | `Tone.Offline` 렌더 → 16비트 PCM WAV |
+| MIDI ★ | `exportMidi` `parseMidi` `midiToSongData` `loadMidiArrayBuffer` `openMidiModal` `noteNameToMidi` | 표준 SMF 직접 읽고 쓰기(라이브러리 없음). 1칸=16분음표(PPQ480→120틱), 드럼=GM 채널10. 불러오기는 32분음표에 양자화(약간 손실) |
 | 오선지 악보 | `buildScoreSVG` `openScoreModal` `noteToStaff` `scoreToPng` | 격자를 5선 악보(SVG)로 + PNG 저장(멜로디만) |
 | 시작 | (하단) | localStorage 로드 → 해시 임포트 or 지난 곡 or 새 곡 |
 
@@ -215,6 +216,21 @@ git add -A && git commit -m "..." && git push
 
 ---
 
+## MIDI 내보내기/불러오기 (표준 SMF, 라이브러리 없음)
+
+왼쪽 드로어 → `🎵 MIDI 내보내기/불러오기`(`openMidiModal`). 다른 DAW와 호환되는 표준 MIDI 파일을 손으로 직접 읽고 쓴다.
+
+- **타이밍**: 격자 1칸 = 16분음표(재생과 동일: `(60/bpm)/4`초). **PPQ 480 → 1칸=120틱, 반칸(32분음표)=+60틱**. 박자표 분모는 4분음표 고정.
+- **내보내기**(`exportMidi`) — 포맷 1(지휘 트랙[템포·박자·이름] + 트랙별 1개). 노트마다 노트온/오프, 같은 틱은 오프 먼저. 멜로디는 채널 0부터(채널 10 건너뜀),
+  **드럼은 GM 채널 10**(`DRUM_GM`: 킥36·스네어38·하이햇42). `downloadBlob`로 `.mid` 저장. 거의 무손실.
+- **불러오기**(`parseMidi`→`midiToSongData`→`loadMidiArrayBuffer`) — VLQ·러닝스테이터스·메타(템포/이름) 파싱, 노트온만 모음. **가장 가까운 32분음표에 양자화**(약간 손실),
+  채널 10=드럼(`GM_TO_DRUM`), 멜로디 음역(C3~C6=MIDI 48~84) 밖은 옥타브 이동(`midiToMelodyName`). 리포트 `{ placed, dropped, transposed }`를 토스트로 안내.
+  파일 선택(사용자 제스처) 후 `openSession`이 신스를 만들므로 **`await Tone.start()` 먼저**. bars는 내용 길이로 자동(최대 64마디, 넘치면 드롭).
+- **한계**: 노트 길이·벨로시티·프로그램은 왕복에서 무시(격자 모델엔 길이 개념 없음, 1칸 고정). SMPTE 타임코드 division은 미지원(에러).
+- 코드로 검증: `midiToSongData(parseMidi(arrayBuffer))`로 상태 안 바꾸고 `{data, report}` 확인, 또는 `exportMidi`의 `downloadBlob`를 잠깐 가로채 blob→`parseMidi` 왕복.
+
+---
+
 ## 규칙 · 이미 겪은 함정 (되풀이하지 말 것)
 
 - **오디오는 사용자 제스처 뒤에만.** 재생/미리듣기/노트 탭 핸들러에서 `await Tone.start()`를 먼저. (WAV=`Tone.Offline`이라 불필요.)
@@ -240,7 +256,7 @@ git add -A && git commit -m "..." && git push
 - [x] 피아노 롤+재생 · 멀티 트랙+곡 길이 · 곡=세션 · 링크 공유(gzip) · WAV · 오선지
 - [x] 넓은 음역(C3~C6)+세로 스크롤 · 상단 고정 재생바 · 기타·클라리넷 · 오디오 샘플 · 트랙 접기/순서/이름/볼륨/잔향
 - [x] 드럼 폴리포닉 원샷 · **신디사이저 대폭 확장**(필터·이펙트·모듈레이션+프리셋 8종) · **가로·세로 줌 + 반칸(32분음표)**
-- [x] **박자 n×m(박자선·마디선)** · **편집 모드(잠금)** · **노트 이동 모드(선택이동) + 단일 노트 드래그** · **재생/정지=일시정지** · 수동 저장 · **JSON 내보내기/불러오기(AI용)**
+- [x] **박자 n×m(박자선·마디선)** · **편집 모드(잠금)** · **노트 이동 모드(선택이동) + 단일 노트 드래그** · **재생/정지=일시정지** · 수동 저장 · **JSON 내보내기/불러오기(AI용, 드롭 리포트+dry-run 검증)** · **MIDI 내보내기/불러오기(표준 SMF)**
 - [ ] ⚙️ 환경설정(왼쪽 메뉴 잠금 표시) · (더 크게) 기기 간 진짜 동기화 = 서버/계정 필요 · 멀티샘플 · 정식 오선지(음표 길이·쉼표·빔)
 - [ ] (알아둘 한계) **확장 신스 파라미터·줌은 공유 코덱에 안 담김** — 담으려면 코덱 버전 올려야
 
