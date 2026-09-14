@@ -224,9 +224,12 @@ function createVoices(track, out) {
     return { kind: "melody", poly: silent, vol };
   }
   if (snd) {
-    // 신스 소리: 사용자가 만든 음색. MonoSynth로 필터(공명)+필터엔벨로프를 내장으로 얻고,
-    // 뒤에 이펙트 체인(디스토션·비트크러셔·코러스·비브라토·트레모로)을 단다.
-    const poly = new Tone.PolySynth(Tone.MonoSynth, monoSynthOpts(snd));
+    // 신스 소리: 사용자가 만든 음색. filterOn=false면 필터 없는 생 오실레이터(Tone.Synth)로 —
+    // AI Web Audio 아티팩트와 동일 구조(순수 파형). 아니면 MonoSynth로 필터(공명)+필터엔벨로프 내장.
+    // 둘 다 뒤에 이펙트 체인(디스토션·비트크러셔·코러스·딜레이·비브라토·트레모로)을 단다.
+    const poly = snd.filterOn === false
+      ? new Tone.PolySynth(Tone.Synth, rawSynthOpts(snd))
+      : new Tone.PolySynth(Tone.MonoSynth, monoSynthOpts(snd));
     poly.volume.value = snd.volume;
     const fx = buildFxChain(poly, snd, vol);
     return { kind: "melody", poly, fx, vol };
@@ -289,6 +292,7 @@ function defaultParams() {
     // 펄스 폭(파형이 pulse일 때만 의미. 0.5=사각과 동일, 0.25/0.125=클래식 칩튠 듀티)
     pulseWidth: 0.25,
     // 필터
+    filterOn: true,   // false면 필터 없는 '생 오실레이터'(레트로 원음). AI가 만든 순수 파형까지 재현
     filterType: "lowpass", resonance: 1, filterEnvAmount: 0, filterDecay: 0.3,
     // 두께(유니즌 디튠, 0=끔)
     detune: 0,
@@ -337,6 +341,13 @@ function synthOscOpts(s) {
   if (s.wave === "pulse") return { type: "pulse", width: s.pulseWidth ?? 0.25 };
   return det > 0 ? { type: "fat" + s.wave, count: 3, spread: det } : { type: s.wave };
 }
+// 필터 없는 생 오실레이터 옵션(Tone.Synth용). filterOn=false일 때 씀 — AI 아티팩트와 동일한 구조.
+function rawSynthOpts(s) {
+  return {
+    oscillator: synthOscOpts(s),
+    envelope: { attack: s.attack, decay: s.decay, sustain: s.sustain, release: s.release },
+  };
+}
 function monoSynthOpts(s) {
   return {
     oscillator: synthOscOpts(s),
@@ -376,7 +387,9 @@ function applyParamsLive(track) {
   if (!s || s.kind !== "melody" || !s.poly.set) return;
   const p = trackSound(track);
   if (!p || p.kind === "sample") return;
-  s.poly.set(monoSynthOpts(p));
+  // filterOn 자체가 바뀌면 신스 클래스(Synth↔MonoSynth)가 달라져 set으로 못 바꾼다 → rebuildTracksUsing로 재생성.
+  // 여기서는 같은 클래스 안에서의 파라미터만 라이브 반영한다.
+  s.poly.set(p.filterOn === false ? rawSynthOpts(p) : monoSynthOpts(p));
   s.poly.volume.value = p.volume;
   if (s.fx) applyFxValues(s.fx, p);
 }
@@ -2662,6 +2675,17 @@ function openSoundEditor(sound) {
   slider("릴리스 (여운)", "release", 0, 3, 0.01, "s", (v) => v.toFixed(2), "뗀 뒤 사라지는 여운.");
 
   section("필터 (밝기·질감)");
+  { // 필터 on/off — 끄면 필터 없는 생 오실레이터(레트로 원음, AI 아티팩트와 동일 구조)
+    const btn = document.createElement("button");
+    btn.type = "button"; btn.className = "wave-btn";
+    const paint = () => { const on = sound.filterOn !== false; btn.textContent = on ? "필터 켜짐" : "필터 꺼짐 (생 오실레이터)"; btn.classList.toggle("on", on); };
+    paint();
+    btn.addEventListener("click", () => {
+      sound.filterOn = sound.filterOn === false;      // 토글
+      paint(); rebuildTracksUsing(sound); markDirty(); playSoundPreview(sound);
+    });
+    addField("필터 사용", btn, "끄면 필터 없는 생 오실레이터(순수 파형·레트로 원음). 아래 필터 값들은 무시됩니다. 켜면 컷오프·공명으로 밝기를 조절합니다.");
+  }
   dropdown("필터 종류", "filterType", FILTER_TYPES, "통과 대역. 로우패스=낮은 쪽(둥글게), 하이패스=높은 쪽(얇게), 밴드패스=가운데.");
   slider("컷오프 (밝기)", "cutoff", 200, 8000, 10, "Hz", (v) => Math.round(v), "자르기 시작하는 지점. 낮추면 먹먹, 높이면 선명.");
   slider("공명 (Resonance)", "resonance", 0.5, 12, 0.1, "", (v) => v.toFixed(1), "컷오프를 뾰족하게 강조. 올리면 '삑/뿅'(과하면 삑사리).");
