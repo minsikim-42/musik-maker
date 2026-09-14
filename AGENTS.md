@@ -1,8 +1,79 @@
-# AGENTS.md
+# AGENTS.md — AI가 곡을 만들 때 보는 실전 가이드
 
-이 저장소의 에이전트/AI용 안내는 **[`CLAUDE.md`](CLAUDE.md)** 에 있다. 그 파일을 먼저 읽을 것.
+이 저장소는 **브라우저 작곡(시퀀서) 웹앱**이다(정적, 빌드 없음, 소리 엔진 Tone.js).
+코드 구조·함정·개발 규칙은 **[`CLAUDE.md`](CLAUDE.md)** 에 있다 — 코드를 고칠 거면 먼저 읽을 것.
 
-요약: `index.html`+`style.css`+`app.js`로 된 **정적 웹 작곡(시퀀서) 앱**. 빌드 없음, 소리 엔진은
-Tone.js(CDN). 곡은 localStorage에 "세션"으로 저장되고 URL 해시로 공유한다. 라이브는
-GitHub Pages(https://minsikim-42.github.io/musik-maker/). 검증은 자동 테스트가 아니라
-브라우저로 직접 확인한다. 자세한 구조·데이터 모델·함정은 `CLAUDE.md` 참고.
+이 문서는 **AI가 이 앱으로 곡을 "만들어 넣는" 방법**만 다룬다. 사람이 쓰든 AI가 쓰든 통로는 하나:
+왼쪽 드로어 → **`📋 JSON 내보내기/불러오기 (AI용)`**. 곡을 아래 JSON으로 붙여넣고 "불러오기"하면 새 곡으로 열린다.
+
+- 기계용 스키마: [`schema/song.schema.json`](schema/song.schema.json) (JSON Schema draft-07)
+- 완성 예제: [`examples/dungeon-adventure.json`](examples/dungeon-adventure.json) (칩튠 던전 루프, 4트랙)
+
+---
+
+## 최소 곡 (복사해서 시작)
+
+```json
+{
+  "name": "내 곡", "bpm": 120, "bars": 2, "beatUnit": 4, "barBeats": 4,
+  "tracks": [
+    { "instrument": "piano", "name": "멜로디",
+      "notes": [ {"n":"C5","t":0}, {"n":"E5","t":4}, {"n":"G5","t":8} ] },
+    { "type": "drums", "name": "드럼",
+      "notes": [ {"n":"킥","t":0}, {"n":"스네어","t":4}, {"n":"하이햇","t":2} ] }
+  ]
+}
+```
+
+## 반드시 지킬 규칙
+
+- **시간축 `t` = 칸 번호(0부터).** 격자 1칸 = 16분음표. **칸 수 = `bars × beatUnit × barBeats`** → `t`는 `0 ~ 칸수-1`.
+  - 한 박 = `beatUnit`칸(기본 4). 한 마디 = `barBeats`박(기본 4). 즉 기본값에서 **한 마디 = 16칸**.
+  - 예: `bars:4` → 64칸 → `t`는 0~63. 범위를 넘는 `t`는 **무시**되고 리포트에 집계된다.
+- **음이름 `n`**
+  - 멜로디: `"C5"`, `"F#4"` 같은 표기. **음역은 C3~C6**(이 밖은 배치 안 됨).
+  - 드럼(`type:"drums"` 트랙): `"킥"`, `"스네어"`, `"하이햇"` — `kick`/`snare`/`hihat`/`hh` 별칭도 허용.
+- **반박자**: 음에 `"h":true`를 주면 그 칸의 32분음표 뒤에 찍힌다(오프비트).
+- **화음**: 같은 `t`에 여러 음을 넣으면 동시에 울린다.
+- **모르는 음이름·범위 밖 `t`는 조용히 삼키지 않는다.** 불러오면 "N개 배치, M개 무시(…)" 리포트가 뜬다 → 자기 실수를 즉시 확인할 것.
+
+## 악기 고르기
+
+- **내장 악기**(트랙에 `"instrument"`): `piano` · `synth` · `pluck` · `bass` · `guitar` · `wind`(클라리넷).
+- **커스텀 신스**: 최상위 `"sounds"`에 소리를 정의하고, 트랙에서 `"sound":"<그 소리 name>"`으로 참조.
+  파라미터는 스키마의 `sound` 정의 참고(파형·ADSR·필터·이펙트).
+
+### 레트로/칩튠을 만들려면 (중요)
+
+내장 악기는 "리얼 악기 근사"라 밋밋하게 들린다. **8비트/칩튠 느낌의 핵심은 파형과 이펙트**다:
+
+- `wave`: **`square`**(50% 듀티) 또는 **`pulse`**(`pulseWidth`로 25%/12.5% 듀티) — 이게 칩튠의 정체성.
+- `bitcrush`: 0.1~0.3 → 해상도를 낮춘 8비트 특유의 거친 질감.
+- `delay`: 0.15~0.3 → 던전·우주 같은 **공간감(에코)**. (트랙 단위 `reverb`도 있음.)
+- 베이스는 `triangle`(NES 베이스), 리드는 `pulse`, 드럼은 `type:"drums"`(노이즈 기반).
+
+칩튠 소리는 UI 프리셋에도 있다(소리 만들기·편집 → 프리셋): **칩 리드(펄스)/칩 리드(사각)/칩 베이스(삼각)/칩 아르페지오/칩 오르간**.
+바로 쓰려면 [`examples/dungeon-adventure.json`](examples/dungeon-adventure.json)의 `sounds` 블록을 복사해 파라미터를 참고하라.
+
+## 코드로 검증하기 (브라우저 콘솔 / 에이전트)
+
+대부분 함수가 전역이다. 상태를 **안 바꾸고** 먼저 점검:
+
+```js
+validateFriendlyJSON(obj)
+// → { ok, placed, dropped, badNames:[], oob:[], steps, errors:[] }
+```
+
+실제로 새 곡으로 불러오려면:
+
+```js
+loadFriendlyJSON(obj)   // 새 세션으로 담고 연다. { placed, bad, oob } 리포트 반환
+```
+
+소리 품질(피크·하드클리핑)은 `Tone.Offline`로 오프라인 렌더해 파형을 재서 확인한다(자세한 방법 `CLAUDE.md`).
+
+## 하면 안 되는 것
+
+- **오디오 샘플의 실제 오디오는 JSON에 안 담긴다**(파라미터만). 오디오는 UI로 넣어야 한다.
+- **공유 링크(URL 해시)에는 확장 신스 파라미터(필터/이펙트/모듈레이션/`pulseWidth`/`delay`/디튠)가 안 실린다** — 파형·ADSR·컷오프·볼륨만.
+  온전한 소리는 **세션 저장**이나 **이 JSON**으로 주고받을 것.

@@ -68,7 +68,7 @@ git add -A && git commit -m "..." && git push
 | 섹션(대략 줄) | 핵심 | 하는 일 |
 |---|---|---|
 | 상수·음역 | `buildMelodyNotes` `MELODY_NOTES`(C6~C3 37줄) `DRUM_ROWS`(하이햇/스네어/킥) `beatUnit` `barBeats` `barCells()` `steps` | 음/드럼 줄 정의. **박자 = n×m**: 한 박=`beatUnit`칸(얕은 선), 한 마디=`barBeats`박(굵은 선), `steps=bars*barCells()` |
-| 소리 라이브러리·프리셋 | `soundLib` `INSTRUMENT_PRESETS`(8종) `addPresetSound` `newSound` `defaultParams` `PARAM_RANGES` `findSound` `trackSound` `sampleBuffers` `loadSampleBuffer` | 곡별 커스텀 소리(신스/샘플). 트랙은 `instrument="snd:<id>"`로 참조 |
+| 소리 라이브러리·프리셋 | `soundLib` `INSTRUMENT_PRESETS`(13종: 오케스트라 8 + **칩튠 5**) `addPresetSound` `newSound` `defaultParams` `PARAM_RANGES` `findSound` `trackSound` `sampleBuffers` `loadSampleBuffer` | 곡별 커스텀 소리(신스/샘플). 트랙은 `instrument="snd:<id>"`로 참조. 칩튠 팩=`pulse` 파형·`bitcrush`·`delay`로 8비트 질감 |
 | 마스터 | `softShape` `makeMaster` `realtimeMaster` | 헤드룸(-6dB)+넓은범위 소프트클립(겹쳐도 하드클리핑/파열음 없음. "오디오 체인") |
 | 악기(신스) | `createVoices` `buildSynth` `disposeSynth` `applyParamsLive` `applySoundToTracks` `triggerTrack` `preview` `setTrackVolume` `setTrackReverb` | 트랙에 맞는 Tone 노드 생성·해제, 한 스텝 울리기. 커스텀 신스는 **필터/이펙트/모듈레이션 내장**(아래 소리 모델) |
 | 드럼 | `makeNoiseBurst` `makeKickBuffer` | 킥·스네어·하이햇 **셋 다 타격마다 새 `ToneBufferSource` 원샷(폴리포닉)** |
@@ -85,6 +85,7 @@ git add -A && git commit -m "..." && git push
 | 드로어+메뉴 | `MENU` `openDrawer` `showToast` | 왼쪽 "내 곡" 목록 + 기능 메뉴 |
 | 링크 공유 | `encodeShare` `decodeShare` `gzipBytes` `openShareModal` `importFromHash` | 곡을 URL에 비트패킹(길면 gzip `#songz=`) |
 | JSON(AI용) ★ | `songToJSON` `friendlyToData` `validateFriendlyJSON` `loadFriendlyJSON` `openJsonModal` | 곡을 **음이름 목록 JSON**으로 주고받기(AI가 곡을 읽고 쓰기 쉬움. 드롭 리포트+dry-run 검증. 아래 전용 섹션) |
+| AI 프로그램 API ★ | `musikMakerInfo` `renderActiveSongStats` | AI/에이전트가 **직접 만들 필요 없이** 곡을 완성하는 루프: 발견(`musikMakerInfo`=악기·드럼·파형·프리셋·API 목록) → 검증 → 불러오기 → **귀 없는 수치 검증**(`renderActiveSongStats`=오프라인 렌더 peak/rms/clip/트랙별 음수) → 내보내기. 문서는 `AGENTS.md`, 스키마 `schema/song.schema.json`, 예제 `examples/dungeon-adventure.json` |
 | WAV 내보내기 | `exportWav` `scheduleTrackOffline` `audioBufferToWav` | `Tone.Offline` 렌더 → 16비트 PCM WAV |
 | MIDI ★ | `exportMidi` `parseMidi` `midiToSongData` `loadMidiArrayBuffer` `openMidiModal` `noteNameToMidi` | 표준 SMF 직접 읽고 쓰기(라이브러리 없음). 1칸=16분음표(PPQ480→120틱), 드럼=GM 채널10. 불러오기는 32분음표에 양자화(약간 손실) |
 | 오선지 악보 | `buildScoreSVG` `openScoreModal` `noteToStaff` `scoreToPng` | 격자를 5선 악보(SVG)로 + PNG 저장(멜로디만) |
@@ -138,10 +139,12 @@ git add -A && git commit -m "..." && git push
 ```js
 // 신스(커스텀): 기본형에 필터·이펙트·모듈레이션까지
 { id, name, wave, attack, decay, sustain, release, cutoff, volume,
+  pulseWidth,                                            // wave="pulse"일 때 듀티(0.5=사각, 0.25/0.125=칩튠). 다른 파형엔 무시
   filterType, resonance, filterEnvAmount, filterDecay,   // 필터(로우/하이/밴드패스, 공명, 필터 엔벨로프)
-  detune,                                                // 유니즌 두께(fat 오실레이터)
-  distortion, bitcrush, chorus,                          // 이펙트(0=끔)
+  detune,                                                // 유니즌 두께(fat 오실레이터). pulse엔 미적용
+  distortion, bitcrush, chorus, delay,                   // 이펙트(0=끔). delay=피드백 딜레이(에코)
   vibrato, tremolo }                                     // 모듈레이션(0=끔)
+// wave 목록(WAVE_LIST): sine·triangle·square·sawtooth·pulse. ⚠ 코덱은 wave를 인덱스로 저장 → 새 파형은 '끝에 append'만(하위호환).
 // 오디오 샘플
 { id, name, kind:"sample", audio:<dataURL>, baseNote, baseAuto, volume }
 ```
@@ -257,8 +260,9 @@ git add -A && git commit -m "..." && git push
 - [x] 넓은 음역(C3~C6)+세로 스크롤 · 상단 고정 재생바 · 기타·클라리넷 · 오디오 샘플 · 트랙 접기/순서/이름/볼륨/잔향
 - [x] 드럼 폴리포닉 원샷 · **신디사이저 대폭 확장**(필터·이펙트·모듈레이션+프리셋 8종) · **가로·세로 줌 + 반칸(32분음표)**
 - [x] **박자 n×m(박자선·마디선)** · **편집 모드(잠금)** · **노트 이동 모드(선택이동) + 단일 노트 드래그** · **재생/정지=일시정지** · 수동 저장 · **JSON 내보내기/불러오기(AI용, 드롭 리포트+dry-run 검증)** · **MIDI 내보내기/불러오기(표준 SMF)**
+- [x] **레트로/칩튠 팩**(`pulse` 파형+듀티, `delay`(에코) FX, 프리셋 5종) · **AI 프로그램 API**(`musikMakerInfo` 발견 + `renderActiveSongStats` 귀 없는 수치 검증) · **AI용 스펙/예제 파일**(`AGENTS.md`·`schema/`·`examples/`)
 - [ ] ⚙️ 환경설정(왼쪽 메뉴 잠금 표시) · (더 크게) 기기 간 진짜 동기화 = 서버/계정 필요 · 멀티샘플 · 정식 오선지(음표 길이·쉼표·빔)
-- [ ] (알아둘 한계) **확장 신스 파라미터·줌은 공유 코덱에 안 담김** — 담으려면 코덱 버전 올려야
+- [ ] (알아둘 한계) **확장 신스 파라미터(필터·이펙트·모듈레이션·`pulseWidth`·`delay`·디튠)·줌은 공유 코덱에 안 담김** — 세션·JSON엔 온전. 링크에 담으려면 코덱 버전 올려야(wave는 append라 이미 담김)
 
 ## 작업 방식
 

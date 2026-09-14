@@ -286,12 +286,14 @@ function defaultParams() {
   return {
     wave: "sawtooth", attack: 0.01, decay: 0.2, sustain: 0.4, release: 0.6,
     cutoff: 2000, volume: -8,
+    // 펄스 폭(파형이 pulse일 때만 의미. 0.5=사각과 동일, 0.25/0.125=클래식 칩튠 듀티)
+    pulseWidth: 0.25,
     // 필터
     filterType: "lowpass", resonance: 1, filterEnvAmount: 0, filterDecay: 0.3,
     // 두께(유니즌 디튠, 0=끔)
     detune: 0,
     // 이펙트 (0=끔)
-    distortion: 0, bitcrush: 0, chorus: 0,
+    distortion: 0, bitcrush: 0, chorus: 0, delay: 0,
     // 모듈레이션 (0=끔)
     vibrato: 0, tremolo: 0,
   };
@@ -309,6 +311,14 @@ const INSTRUMENT_PRESETS = [
   { emoji: "🎺", name: "금관(트럼펫)", p: { wave: "sawtooth", attack: 0.05,  decay: 0.18, sustain: 0.85, release: 0.22, cutoff: 2600, resonance: 1.4, filterEnvAmount: 1.6, filterDecay: 0.14, volume: -9 } },
   { emoji: "🎹", name: "오르간",       p: { wave: "square",   attack: 0.01,  decay: 0.05, sustain: 1.0,  release: 0.08, cutoff: 3500, resonance: 0.5, chorus: 0.15, volume: -12 } },
   { emoji: "🥁", name: "팀파니",       p: { wave: "sine",     attack: 0.003, decay: 0.7,  sustain: 0.0,  release: 0.5,  cutoff: 900,  resonance: 1.5, filterEnvAmount: 0.8, filterDecay: 0.3, distortion: 0.08, volume: -3 } },
+  // ── 레트로/칩튠 팩(NES·게임보이 사운드칩 느낌) ──────────────
+  // 필터로 부드럽게 하지 않고 '날것'의 파형을 살린다. bitcrush로 8비트 특유의 거친 질감,
+  // delay로 던전/우주 공간감. 이게 프리셋(오케스트라 근사)과의 결정적 차이.
+  { emoji: "👾", name: "칩 리드(펄스)",   p: { wave: "pulse",    pulseWidth: 0.25,  attack: 0.005, decay: 0.08, sustain: 0.85, release: 0.06, cutoff: 9000, resonance: 0.3, bitcrush: 0.2,  vibrato: 0.12, delay: 0.22, volume: -9 } },
+  { emoji: "🎮", name: "칩 리드(사각)",   p: { wave: "square",                      attack: 0.004, decay: 0.06, sustain: 0.9,  release: 0.05, cutoff: 9000, resonance: 0.3, bitcrush: 0.15, vibrato: 0.1,  delay: 0.18, volume: -10 } },
+  { emoji: "🔺", name: "칩 베이스(삼각)", p: { wave: "triangle",                    attack: 0.004, decay: 0.12, sustain: 0.7,  release: 0.08, cutoff: 1400, resonance: 0.4, bitcrush: 0.12, volume: -4 } },
+  { emoji: "✨", name: "칩 아르페지오",   p: { wave: "pulse",    pulseWidth: 0.125, attack: 0.001, decay: 0.1,  sustain: 0.0,  release: 0.05, cutoff: 9500, resonance: 0.4, bitcrush: 0.3,  delay: 0.28, volume: -10 } },
+  { emoji: "🏰", name: "칩 오르간(사각)", p: { wave: "square",                      attack: 0.008, decay: 0.04, sustain: 1.0,  release: 0.06, cutoff: 6000, resonance: 0.4, chorus: 0.2,   delay: 0.15, volume: -12 } },
 ];
 // 프리셋으로 새 소리 하나 만들고 편집기를 연다(만든 뒤 슬라이더로 더 다듬을 수 있게).
 function addPresetSound(preset) {
@@ -322,6 +332,8 @@ const FILTER_TYPES = [["lowpass", "로우패스 (두껍게)"], ["highpass", "하
 // 커스텀 소리 → Tone.MonoSynth 옵션. detune>0면 fat 오실레이터(유니즌)로 두껍게.
 function synthOscOpts(s) {
   const det = s.detune ?? 0;
+  // 펄스는 duty(width)를 갖는다. Tone엔 "fatpulse"가 없어 디튠은 무시하고 폭만 준다.
+  if (s.wave === "pulse") return { type: "pulse", width: s.pulseWidth ?? 0.25 };
   return det > 0 ? { type: "fat" + s.wave, count: 3, spread: det } : { type: s.wave };
 }
 function monoSynthOpts(s) {
@@ -344,8 +356,10 @@ function buildFxChain(poly, s, out) {
   const crush = new Tone.BitCrusher({ bits: 4 }); crush.wet.value = s.bitcrush ?? 0;
   const chorus = new Tone.Chorus({ frequency: 2.2, delayTime: 3.2, depth: 0.7, wet: s.chorus ?? 0 }).start();
   const trem = new Tone.Tremolo({ frequency: 6, depth: s.tremolo ?? 0 }).start();
-  poly.chain(vib, dist, crush, chorus, trem, out);
-  return { vib, dist, crush, chorus, trem };
+  // 딜레이(에코): 점8분음표 피드백. 던전·우주 같은 공간감. 0=끔.
+  const delay = new Tone.FeedbackDelay({ delayTime: "8n.", feedback: 0.32, wet: s.delay ?? 0 });
+  poly.chain(vib, dist, crush, chorus, trem, delay, out);
+  return { vib, dist, crush, chorus, trem, delay };
 }
 function applyFxValues(fx, s) {
   fx.vib.depth.value = s.vibrato ?? 0;
@@ -353,6 +367,7 @@ function applyFxValues(fx, s) {
   fx.crush.wet.value = s.bitcrush ?? 0;
   fx.chorus.wet.value = s.chorus ?? 0;
   fx.trem.depth.value = s.tremolo ?? 0;
+  if (fx.delay) fx.delay.wet.value = s.delay ?? 0;
 }
 // 소리를 편집할 때: 그 소리를 쓰는 트랙 신스에 즉시 반영(재생성 없이)
 function applyParamsLive(track) {
@@ -1883,7 +1898,9 @@ function showToast(msg, actionLabel, onAction) {
 // → 비트로 패킹해 base64로 만들어 링크를 짧게 유지한다.
 const INSTR_LIST = ["piano", "synth", "pluck", "bass", "custom"]; // v1/v2 레거시 디코드용
 const BUILTIN = ["piano", "synth", "pluck", "bass", "guitar", "wind"]; // v3+ 기본 악기(0..)
-const WAVE_LIST = ["sine", "triangle", "square", "sawtooth"];
+// ⚠ 코덱은 파형을 이 배열의 인덱스로 저장한다. 새 파형은 반드시 "끝에 append" 해야
+// 옛 인덱스(0~3)가 그대로 유지돼 하위호환이 깨지지 않는다(버전 업 불필요).
+const WAVE_LIST = ["sine", "triangle", "square", "sawtooth", "pulse"];
 // 커스텀 음색 파라미터를 바이트로 양자화(공유 링크에 싣기 위해). [min,max]
 const PARAM_RANGES = { attack: [0, 2], decay: [0, 2], sustain: [0, 1], release: [0, 3], cutoff: [200, 8000], volume: [-30, 0] };
 const q8 = (v, [lo, hi]) => Math.max(0, Math.min(255, Math.round(((v - lo) / (hi - lo)) * 255)));
@@ -2468,7 +2485,7 @@ async function openShareModal() {
 function closeModal() { modal.hidden = true; sampleEditorOpenId = null; }
 
 // ── 신디사이저: 소리 관리자 + 음색 편집기 ─────────────────────
-const WAVE_LABEL = { sine: "사인 ∿", triangle: "삼각 △", square: "사각 ⊓", sawtooth: "톱니 ◺" };
+const WAVE_LABEL = { sine: "사인 ∿", triangle: "삼각 △", square: "사각 ⊓", sawtooth: "톱니 ◺", pulse: "펄스 ⊔" };
 
 // 소리 목록 관리자: 추가/편집/이름변경/삭제
 function openSoundManager() {
@@ -2633,7 +2650,10 @@ function openSoundEditor(sound) {
     });
     waveRow.appendChild(b);
   }
-  addField("파형", waveRow, "소리의 기본 재질. 사인=순함, 삼각=살짝 부드럽게, 사각=레트로, 톱니=밝고 꽉 참.");
+  addField("파형", waveRow, "소리의 기본 재질. 사인=순함, 삼각=살짝 부드럽게, 사각=레트로, 톱니=밝고 꽉 참, 펄스=칩튠 리드(폭 조절).");
+
+  // 펄스 폭: 파형이 pulse일 때만 소리에 영향(0.5=사각과 동일, 좁힐수록 얇고 '뾰족'한 8비트 음색).
+  slider("펄스 폭 (Duty)", "pulseWidth", 0.05, 0.5, 0.005, "", (v) => v.toFixed(3), "'펄스' 파형 전용. 0.5=사각과 같음, 0.25/0.125=클래식 칩튠 리드. 다른 파형에선 무시됨.");
 
   slider("어택 (시작 빠르기)", "attack", 0, 2, 0.005, "s", (v) => v.toFixed(3), "최대 크기까지 걸리는 시간. 짧으면 '탁', 길면 '스르륵'.");
   slider("디케이 (감쇠)", "decay", 0, 2, 0.005, "s", (v) => v.toFixed(3), "최대 뒤 서스테인 크기까지 줄어드는 시간.");
@@ -2654,6 +2674,7 @@ function openSoundEditor(sound) {
   slider("디스토션", "distortion", 0, 1, 0.01, "", (v) => v.toFixed(2), "찌그러뜨려 거칠게. 0이면 끔.");
   slider("비트크러셔", "bitcrush", 0, 1, 0.01, "", (v) => v.toFixed(2), "해상도를 낮춰 8비트 레트로. 0이면 끔.");
   slider("코러스", "chorus", 0, 1, 0.01, "", (v) => v.toFixed(2), "복사본을 겹쳐 넓고 몽환적으로. 0이면 끔.");
+  slider("딜레이 (에코)", "delay", 0, 1, 0.01, "", (v) => v.toFixed(2), "메아리를 더해 던전·우주 같은 공간감. 0이면 끔.");
 
   section("흔들림 (모듈레이션)", false);
   slider("비브라토", "vibrato", 0, 1, 0.01, "", (v) => v.toFixed(2), "음정이 규칙적으로 떨림. 0이면 끔.");
@@ -3003,6 +3024,71 @@ async function exportWav() {
   } finally {
     exporting = false;
   }
+}
+
+// ══════════════════════════════════════════════════════════════
+//  AI·에이전트용 프로그램 API — "직접 만들 필요 없이" 이 앱으로 곡을 완성하는 루프
+// ══════════════════════════════════════════════════════════════
+// 발견 → 검증 → 불러오기 → (귀 없이) 수치 검증 → 내보내기. 전부 전역 함수로 노출된다.
+// 자세한 사용법은 AGENTS.md.
+
+// 이 앱에서 곡을 만들 때 필요한 "어휘"를 한 번에 알려준다(악기·드럼·파형·프리셋·API 목록).
+function musikMakerInfo() {
+  return {
+    format: "friendly JSON — schema/song.schema.json, examples/dungeon-adventure.json 참고",
+    grid: "1칸 = 16분음표. 칸 수 = bars × beatUnit × barBeats. t는 0 ~ 칸수-1.",
+    noteRange: { melody: MELODY_NOTES[MELODY_NOTES.length - 1] + " ~ " + MELODY_NOTES[0], rows: MELODY_NOTES.length },
+    drums: DRUM_ROWS.slice(),                    // ["하이햇","스네어","킥"] (kick/snare/hihat/hh 별칭 허용)
+    instruments: BUILTIN.slice(),                // 내장 악기(track.instrument)
+    waves: WAVE_LIST.slice(),                    // 커스텀 소리 파형(pulse 포함)
+    presets: INSTRUMENT_PRESETS.map((p) => ({ name: p.name, params: p.p })),
+    api: {
+      discover: "musikMakerInfo()",
+      validate: "validateFriendlyJSON(obj) → {ok,placed,dropped,badNames,oob,steps,errors}  (상태 안 바꿈)",
+      load: "loadFriendlyJSON(obj) → 새 곡으로 열고 {placed,bad,oob} 리포트",
+      verify: "await renderActiveSongStats() → {durationSec,peak,rms,clippedSamples,silent,tracks}  (귀 없이 소리 확인)",
+      exportJSON: "songToJSON() → 지금 곡을 friendly JSON으로",
+    },
+  };
+}
+
+// 지금 곡을 오프라인 렌더해 소리를 "수치로" 확인한다 — AI가 귀 없이 결과를 검증하는 용도.
+// 다운로드/재생 없이, WAV와 동일한 오디오 체인으로 렌더해 통계만 반환한다.
+// { durationSec, peak, rms, clippedSamples, silent, tracks:[{name,type,notes,muted}] }
+//   silent=true  → 소리가 거의 없음(음이 안 찍혔거나 전부 음소거)
+//   clippedSamples>0 → 과포화(볼륨을 낮출 것)
+async function renderActiveSongStats(extraTail = 1.5) {
+  const countNotes = (t) => {
+    let n = 0;
+    for (const row of t.grid) for (const c of row) if (c) n++;
+    if (t.half) for (const row of t.half) for (const c of row) if (c) n++;
+    return n;
+  };
+  const secondsPerStep = (60 / Number(bpm.value)) / 4;
+  const duration = steps * secondsPerStep + extraTail;
+  const buffer = await Tone.Offline(async () => {
+    const out = makeMaster(); // 재생·WAV와 동일한 마스터(소프트 클리퍼)
+    const vs = tracks.map((t) => ({ t, v: createVoices(t, out) }));
+    await Promise.all(vs.map(({ v }) => { const rv = v.vol && v.vol._reverb; return rv && rv.generate ? rv.generate() : null; }).filter(Boolean));
+    for (const { t, v } of vs) scheduleTrackOffline(t, v, secondsPerStep);
+  }, duration);
+  const audioBuf = buffer.get ? buffer.get() : buffer;
+  const ch = audioBuf.getChannelData(0);
+  let peak = 0, sq = 0, clipped = 0;
+  for (let i = 0; i < ch.length; i++) {
+    const a = Math.abs(ch[i]);
+    if (a > peak) peak = a;
+    sq += ch[i] * ch[i];
+    if (a >= 0.9999) clipped++; // 진짜 하드클리핑(≥1.0)만. peak는 '얼마나 뜨거운지'를 따로 알려준다.
+  }
+  return {
+    durationSec: +duration.toFixed(2),
+    peak: +peak.toFixed(4),
+    rms: +Math.sqrt(sq / ch.length).toFixed(4),
+    clippedSamples: clipped,
+    silent: peak < 0.001,
+    tracks: tracks.map((t) => ({ name: t.name, type: t.type, notes: countNotes(t), muted: !!t.muted })),
+  };
 }
 
 // ══════════════════════════════════════════════════════════════
