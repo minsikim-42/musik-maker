@@ -312,13 +312,14 @@ const INSTRUMENT_PRESETS = [
   { emoji: "🎹", name: "오르간",       p: { wave: "square",   attack: 0.01,  decay: 0.05, sustain: 1.0,  release: 0.08, cutoff: 3500, resonance: 0.5, chorus: 0.15, volume: -12 } },
   { emoji: "🥁", name: "팀파니",       p: { wave: "sine",     attack: 0.003, decay: 0.7,  sustain: 0.0,  release: 0.5,  cutoff: 900,  resonance: 1.5, filterEnvAmount: 0.8, filterDecay: 0.3, distortion: 0.08, volume: -3 } },
   // ── 레트로/칩튠 팩(NES·게임보이 사운드칩 느낌) ──────────────
-  // 필터로 부드럽게 하지 않고 '날것'의 파형을 살린다. bitcrush로 8비트 특유의 거친 질감,
-  // delay로 던전/우주 공간감. 이게 프리셋(오케스트라 근사)과의 결정적 차이.
-  { emoji: "👾", name: "칩 리드(펄스)",   p: { wave: "pulse",    pulseWidth: 0.25,  attack: 0.005, decay: 0.08, sustain: 0.85, release: 0.06, cutoff: 9000, resonance: 0.3, bitcrush: 0.2,  vibrato: 0.12, delay: 0.22, volume: -9 } },
-  { emoji: "🎮", name: "칩 리드(사각)",   p: { wave: "square",                      attack: 0.004, decay: 0.06, sustain: 0.9,  release: 0.05, cutoff: 9000, resonance: 0.3, bitcrush: 0.15, vibrato: 0.1,  delay: 0.18, volume: -10 } },
-  { emoji: "🔺", name: "칩 베이스(삼각)", p: { wave: "triangle",                    attack: 0.004, decay: 0.12, sustain: 0.7,  release: 0.08, cutoff: 1400, resonance: 0.4, bitcrush: 0.12, volume: -4 } },
-  { emoji: "✨", name: "칩 아르페지오",   p: { wave: "pulse",    pulseWidth: 0.125, attack: 0.001, decay: 0.1,  sustain: 0.0,  release: 0.05, cutoff: 9500, resonance: 0.4, bitcrush: 0.3,  delay: 0.28, volume: -10 } },
-  { emoji: "🏰", name: "칩 오르간(사각)", p: { wave: "square",                      attack: 0.008, decay: 0.04, sustain: 1.0,  release: 0.06, cutoff: 6000, resonance: 0.4, chorus: 0.2,   delay: 0.15, volume: -12 } },
+  // '날것'의 pulse/square/triangle 파형 + 살짝 닫은 필터(cutoff~5000)로 원본 Web Audio 톤의 따뜻함을,
+  // delay로 던전 공간감을 재현한다. bitcrush는 원본에 없어 0(편집기에서 원하면 올릴 수 있음).
+  // 밝기(고역 에너지비)를 원본과 오프라인 렌더로 대조해 cutoff를 맞췄다(0.317 ≈ 원본 0.320).
+  { emoji: "👾", name: "칩 리드(펄스)",   p: { wave: "pulse",    pulseWidth: 0.25,  attack: 0.005, decay: 0.10, sustain: 0.85, release: 0.06, cutoff: 5000, resonance: 0.3, vibrato: 0.03, delay: 0.22, volume: -9 } },
+  { emoji: "🎮", name: "칩 리드(사각)",   p: { wave: "square",                      attack: 0.004, decay: 0.08, sustain: 0.9,  release: 0.05, cutoff: 5000, resonance: 0.3, vibrato: 0.03, delay: 0.18, volume: -10 } },
+  { emoji: "🔺", name: "칩 베이스(삼각)", p: { wave: "triangle",                    attack: 0.004, decay: 0.12, sustain: 0.7,  release: 0.08, cutoff: 3000, resonance: 0.3, volume: -4 } },
+  { emoji: "✨", name: "칩 아르페지오",   p: { wave: "pulse",    pulseWidth: 0.125, attack: 0.001, decay: 0.10, sustain: 0.0,  release: 0.05, cutoff: 5000, resonance: 0.3, delay: 0.28, volume: -10 } },
+  { emoji: "🏰", name: "칩 오르간(사각)", p: { wave: "square",                      attack: 0.008, decay: 0.04, sustain: 1.0,  release: 0.06, cutoff: 5000, resonance: 0.3, chorus: 0.2,   delay: 0.15, volume: -12 } },
 ];
 // 프리셋으로 새 소리 하나 만들고 편집기를 연다(만든 뒤 슬라이더로 더 다듬을 수 있게).
 function addPresetSound(preset) {
@@ -357,7 +358,7 @@ function buildFxChain(poly, s, out) {
   const chorus = new Tone.Chorus({ frequency: 2.2, delayTime: 3.2, depth: 0.7, wet: s.chorus ?? 0 }).start();
   const trem = new Tone.Tremolo({ frequency: 6, depth: s.tremolo ?? 0 }).start();
   // 딜레이(에코): 점8분음표 피드백. 던전·우주 같은 공간감. 0=끔.
-  const delay = new Tone.FeedbackDelay({ delayTime: "8n.", feedback: 0.32, wet: s.delay ?? 0 });
+  const delay = new Tone.FeedbackDelay({ delayTime: "8n.", feedback: 0.28, wet: s.delay ?? 0 });
   poly.chain(vib, dist, crush, chorus, trem, delay, out);
   return { vib, dist, crush, chorus, trem, delay };
 }
