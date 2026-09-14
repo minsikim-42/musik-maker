@@ -315,10 +315,10 @@ const INSTRUMENT_PRESETS = [
   // '날것'의 pulse/square/triangle 파형 + 살짝 닫은 필터(cutoff~5000)로 원본 Web Audio 톤의 따뜻함을,
   // delay로 던전 공간감을 재현한다. bitcrush는 원본에 없어 0(편집기에서 원하면 올릴 수 있음).
   // 밝기(고역 에너지비)를 원본과 오프라인 렌더로 대조해 cutoff를 맞췄다(0.317 ≈ 원본 0.320).
-  { emoji: "👾", name: "칩 리드(펄스)",   p: { wave: "pulse",    pulseWidth: 0.25,  attack: 0.005, decay: 0.10, sustain: 0.85, release: 0.06, cutoff: 5000, resonance: 0.3, vibrato: 0.03, delay: 0.22, volume: -9 } },
-  { emoji: "🎮", name: "칩 리드(사각)",   p: { wave: "square",                      attack: 0.004, decay: 0.08, sustain: 0.9,  release: 0.05, cutoff: 5000, resonance: 0.3, vibrato: 0.03, delay: 0.18, volume: -10 } },
+  { emoji: "👾", name: "칩 리드(펄스)",   p: { wave: "pulse",    pulseWidth: 0.25,  attack: 0.005, decay: 0.10, sustain: 0.85, release: 0.06, cutoff: 5000, resonance: 0.3, vibrato: 0.03, delay: 0.30, volume: -9 } },
+  { emoji: "🎮", name: "칩 리드(사각)",   p: { wave: "square",                      attack: 0.004, decay: 0.08, sustain: 0.9,  release: 0.05, cutoff: 5000, resonance: 0.3, vibrato: 0.03, delay: 0.26, volume: -10 } },
   { emoji: "🔺", name: "칩 베이스(삼각)", p: { wave: "triangle",                    attack: 0.004, decay: 0.12, sustain: 0.7,  release: 0.08, cutoff: 3000, resonance: 0.3, volume: -4 } },
-  { emoji: "✨", name: "칩 아르페지오",   p: { wave: "pulse",    pulseWidth: 0.125, attack: 0.001, decay: 0.10, sustain: 0.0,  release: 0.05, cutoff: 5000, resonance: 0.3, delay: 0.28, volume: -10 } },
+  { emoji: "✨", name: "칩 아르페지오",   p: { wave: "pulse",    pulseWidth: 0.125, attack: 0.001, decay: 0.10, sustain: 0.0,  release: 0.05, cutoff: 5000, resonance: 0.3, delay: 0.36, volume: -10 } },
   { emoji: "🏰", name: "칩 오르간(사각)", p: { wave: "square",                      attack: 0.008, decay: 0.04, sustain: 1.0,  release: 0.06, cutoff: 5000, resonance: 0.3, chorus: 0.2,   delay: 0.15, volume: -12 } },
 ];
 // 프리셋으로 새 소리 하나 만들고 편집기를 연다(만든 뒤 슬라이더로 더 다듬을 수 있게).

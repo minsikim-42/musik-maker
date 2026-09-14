@@ -17,7 +17,7 @@
       "cutoff": 5000,
       "resonance": 0.3,
       "vibrato": 0.03,
-      "delay": 0.22,
+      "delay": 0.3,
       "volume": -6
     },
     {
@@ -41,7 +41,7 @@
       "release": 0.05,
       "cutoff": 5000,
       "resonance": 0.3,
-      "delay": 0.28,
+      "delay": 0.36,
       "volume": -7
     }
   ],
@@ -114,12 +114,13 @@
           "n": "C#5",
           "t": 60
         }
-      ]
+      ],
+      "reverb": true
     },
     {
       "name": "아르페지오",
       "sound": "아르페지오",
-      "reverb": false,
+      "reverb": true,
       "notes": [
         {
           "n": "D4",
